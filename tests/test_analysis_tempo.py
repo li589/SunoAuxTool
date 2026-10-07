@@ -76,7 +76,11 @@ def test_click_track_confidence_and_phase(tmp_path: Path, bpm: float):
     est = estimate_bpm(wav)
     assert isinstance(est, TempoEstimate)
     assert est.confidence > 0.5          # 纯节拍信号的自相关峰应显著
-    assert abs(est.beat_offset) < 0.06   # 第一拍就在 t=0
+    # 相位按真值拍网格取模评估（beat_offset 定义域 [0, est_period)；est=90 折半
+    # 时合法锁在奇数拍，如 0.313 @ 180BPM；第一拍在 t=0 时允许 period 附近等价值）
+    per = 60.0 / bpm
+    phase_err = min(est.beat_offset % per, per - est.beat_offset % per)
+    assert phase_err < 0.06
     assert est.onset_rate == pytest.approx(SR / 512, rel=1e-6)
     assert est.duration == pytest.approx(24 * 60.0 / bpm, rel=1e-3)
 
@@ -160,3 +164,29 @@ def test_spectral_base_handles_tiny_signals():
     assert stft_magnitude(x, 2048, 512).shape == (0, 1025)
     assert onset_strength(x, 2048, 512).size == 0
     assert onset_strength(np.zeros(2048, dtype=np.float32), 2048, 512).size == 1
+
+
+def test_beat_offset_known_phase_regression(tmp_path: Path):
+    """B2 回归（1.4.6）：beat_offset 曾被重复除以 rate（0.25s -> 0.0029s）。
+
+    点击轨第一拍故意错开 0.25s，修复后 beat_offset 必须落在真实相位附近；
+    旧实现返回 ~0.003s，任何 ±0.08s 的相位断言都会失败。
+    """
+    bpm, phase, beats = 120.0, 0.25, 24
+    period = 60.0 / bpm
+    sr = SR
+    n = int(beats * period * sr)
+    x = np.zeros(n, dtype=np.float32)
+    for k in range(beats - 1):  # 末拍可能越界，留一格
+        start = int((k * period + phase) * sr)
+        dur = int(0.05 * sr)
+        t = np.arange(dur) / sr
+        x[start : start + dur] += (
+            0.6 * np.sin(2 * np.pi * 880.0 * t) * np.exp(-t * 40.0)
+        ).astype(np.float32)
+    wav = tmp_path / "click_phase.wav"
+    sf.write(wav, x, sr, subtype="PCM_16")
+
+    est = estimate_bpm(wav)
+    assert est.bpm == pytest.approx(bpm, rel=0.03)
+    assert est.beat_offset == pytest.approx(phase, abs=0.08)

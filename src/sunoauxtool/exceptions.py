@@ -1,6 +1,6 @@
 """自定义异常与错误码定义。
 
-错误码约定（见 docs/architecture-P1P2.md §4.4 错误码表）：
+错误码约定（分段注册制，1.4.6 B5 补全 video/download 段）：
     0 成功
     1 参数错误/通用错误
     2 配置错误
@@ -11,6 +11,10 @@
     7 渲染环境不完整（module 缺失/损坏、fluidsynth 不可执行、SF2 不可加载）
     8 批量部分失败
     9 批量全部失败
+    10-14 sunoauxtool.video（视频合成）
+    15 DSP 处理失败 / 16 DSP 参数错误
+    20-24 sunoauxtool.download（猫抓取回转码）
+    25 下载源凭证缺失 / 26 下载源请求失败
 """
 
 from __future__ import annotations
@@ -29,8 +33,22 @@ ERROR_CODES: List[Tuple[int, str, str]] = [
     (7, "渲染环境不完整", "module 缺失/损坏、fluidsynth 不可执行、SF2 不可加载"),
     (8, "批量部分失败", "batch 部分项成功部分失败"),
     (9, "批量全部失败", "batch 全部项失败"),
+    # ---- sunoauxtool.video 段（10-14，语义见 video/exceptions.py）----
+    (10, "视频 ffmpeg 不可用", "ffmpeg 未找到（PATH / SUNO_FFMPEG / --ffmpeg-path 均未命中）"),
+    (11, "视频分辨率/比例不支持", "预设或 --width/--height 组合非法"),
+    (12, "视频输入音频缺失", "无法读取输入音频文件"),
+    (13, "视频渲染失败", "ffmpeg 进程非零退出"),
+    (14, "视频输出路径不可写", "视频/封面输出目录不存在或无写权限"),
+    # ---- 通用 DSP 段 ----
     (15, "DSP 处理失败", "算子运行期错误（读写音频、重采样、算子链执行失败）"),
     (16, "DSP 参数错误", "ops 串解析失败、算子参数非法（trim 越界、fade<0 等）"),
+    # ---- sunoauxtool.download 段（20-24，语义见 download/exceptions.py）----
+    (20, "下载 ffmpeg 不可用", "ffmpeg 未找到（SUNO_FFMPEG / SUNO_FFMPEG_DIRS / PATH / --ffmpeg-path）"),
+    (21, "非 fragmented MP4", "输入不是可解析的 fMP4（猫抓缓存误标 .mp3 实为 Opus 需先转码）"),
+    (22, "输入为加密密文", "取证判定为强加密（卡方 χ²≤360），无密钥不可解码，改用缓存明文副本"),
+    (23, "下载转码失败", "ffmpeg 转码进程非零退出"),
+    (24, "下载输出路径不可写", "输出目录不存在或无写权限"),
+    # ---- 下载源 API 段 ----
     (25, "下载源凭证缺失", "API 下载源（suno-api/haimeng/tianyin）未配置凭证"),
     (26, "下载源请求失败", "API 下载源网络请求/响应解析失败"),
 ]

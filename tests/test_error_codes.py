@@ -42,7 +42,27 @@ def test_batch_failed_error_code_9():
 
 
 def test_error_codes_table_complete():
-    """错误码表：0-9 连续定义（主干）+ 15/16（DSP R6）+ 25/26（下载源 R7）。"""
+    """错误码表：0-9 主干连续 + 10-14（video）+ 15/16（DSP）+ 20-24（download）+ 25/26。
+
+    1.4.6 B5：video/download 两段实际在用但曾漏登记（errors 命令与文档不完整）。
+    """
     codes = [c for c, _n, _d in ERROR_CODES]
     assert codes[:10] == list(range(10))
-    assert set(codes) == {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 15, 16, 25, 26}
+    assert set(codes) == set(range(10)) | set(range(10, 15)) | {15, 16} | set(
+        range(20, 25)
+    ) | {25, 26}
+
+
+def test_error_codes_video_and_download_segments():
+    """B5 回归：10-14 与 20-24 段必须登记且语义与子包异常一致。"""
+    table = {c: n for c, n, _d in ERROR_CODES}
+    assert table[10] == "视频 ffmpeg 不可用"
+    assert table[13] == "视频渲染失败"
+    assert table[22] == "输入为加密密文"
+    assert table[23] == "下载转码失败"
+    # 与子包异常类实际使用的退出码一致
+    from sunoauxtool.download.exceptions import FFmpegNotFoundError as DlFFmpegNotFound
+    from sunoauxtool.video.exceptions import RenderError as VideoRenderError
+
+    assert DlFFmpegNotFound().code == 20
+    assert VideoRenderError("boom").code == 13

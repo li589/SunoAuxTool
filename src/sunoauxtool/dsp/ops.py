@@ -106,13 +106,30 @@ def op_norm(audio: np.ndarray, sr: int, args: Dict[str, str]) -> Tuple[np.ndarra
 def op_loudnorm(audio: np.ndarray, sr: int, args: Dict[str, str]) -> Tuple[np.ndarray, int]:
     """EBU R128 简化版响度归一：K 加权 + 门控积分响度 -> 目标 LUFS（默认 -16）。
 
-    K 加权两阶段：stage1 高架 +4dB（bilinear 变换系数随 sr 伸缩，ITU-R BS.1770 口径），
-    stage2 RLB 高通（38Hz 二阶 Butterworth）。分块 400ms / 步进 100ms，
-    绝对门 -70 LUFS + 相对门 -10 LU。纯 numpy/scipy 实现。
+    K 加权两阶段：stage1 高架 +4dB、stage2 RLB 高通（38Hz），均从 ITU 原型
+    出发按 sr 重新 bilinear（1.4.6 修复非 48k 频响偏置）。分块 400ms / 步进
+    100ms，绝对门 -70 LUFS + 相对门 -10 LU。纯 numpy/scipy 实现。
+
+    峰值保护（1.4.6 B1）：增益后自动串联 ``filters.limiter`` 把峰值硬顶在
+    ceiling 之下（默认 -0.3 dBFS）——高动态素材（crest>10）拉响度可能超过
+    0dBFS，旧实现靠写盘硬 clip 兜底会产生削波失真。``ceiling=<dB>`` 自定义、
+    ``ceiling=off`` 关闭保护。
     """
     target = float(args.get("arg", "-16"))
     if target > 0:
         raise DspParamError("loudnorm 目标 LUFS 必须 <= 0", code=16)
+    ceiling_raw = str(args.get("ceiling", "-0.3")).strip().lower()
+    ceiling_db: Optional[float]
+    if ceiling_raw == "off":
+        ceiling_db = None
+    else:
+        try:
+            ceiling_db = float(ceiling_raw)
+        except ValueError:
+            raise DspParamError(f"loudnorm ceiling 非法: {ceiling_raw!r}", code=16) from None
+        if ceiling_db >= 0:
+            raise DspParamError(f"loudnorm ceiling 须 < 0 dBFS: {ceiling_db}", code=16)
+    from sunoauxtool.dsp.filters import limiter
     from sunoauxtool.dsp.loudness import integrated_lufs
 
     try:
@@ -120,7 +137,10 @@ def op_loudnorm(audio: np.ndarray, sr: int, args: Dict[str, str]) -> Tuple[np.nd
     except ValueError as exc:  # 静音等无法测响度的输入
         raise DspError(f"loudnorm 无法测量响度: {exc}", code=15) from exc
     gain_db = target - lufs
-    return (audio * float(10 ** (gain_db / 20.0))).astype(np.float32), sr
+    out = (audio * float(10 ** (gain_db / 20.0))).astype(np.float32)
+    if ceiling_db is not None:
+        out = limiter(out, sr, ceiling_db=ceiling_db).astype(np.float32)
+    return out, sr
 
 
 def _fit_ramp(ramp: np.ndarray, audio: np.ndarray) -> np.ndarray:
@@ -290,6 +310,17 @@ def op_concat(
     other, other_sr = audio_ops.read_wav(p)
     if other_sr != sr:
         other, _ = op_resample(other, other_sr, {"arg": str(sr)})
+
+    # 声道数前置校验（1.4.6 B4）：采样率不一致有自动重采样，声道数不一致旧实现
+    # 直接裸 np.concatenate ValueError——这里转成带诊断的 DspParamError(16)
+    a_ch = 1 if audio.ndim == 1 else audio.shape[1]
+    o_ch = 1 if other.ndim == 1 else other.shape[1]
+    if a_ch != o_ch:
+        raise DspParamError(
+            f"concat 声道数不匹配: 当前音频 {a_ch}ch, 待拼接 {o_ch}ch "
+            f"({p.name})——请先各自 upmix/downmix 到相同声道数",
+            code=16,
+        )
 
     xf_n = int(xf * sr)
     if xf_n > 0:

@@ -18,7 +18,7 @@ sunoaux post dsp <wav> --ops "<算子串>" [-o out.wav] [--bit-depth 16|24]
 | 算子 | 语法 | 说明 |
 |---|---|---|
 | `norm` | `norm [-1]` | 峰值归一化到目标 dBFS（可放大可衰减；静音不缩放） |
-| `loudnorm` | `loudnorm [-16]` | **EBU R128 简化版**：K 加权（BS.1770 两阶段 biquad，sr 自适应）+ 400ms/100ms 分块 + 绝对门 -70 LUFS / 相对门 -10 LU → 目标 LUFS |
+| `loudnorm` | `loudnorm [-16] [ceiling=-0.3]` | **EBU R128 简化版**：K 加权（BS.1770 两阶段 biquad，逐 sr bilinear）+ 400ms/100ms 分块 + 绝对门 -70 LUFS / 相对门 -10 LU → 目标 LUFS。**峰值保护（1.4.6）**：增益后自动串联 limiter 硬顶在 ceiling dBFS（默认 -0.3，防高动态素材削波）；`ceiling=off` 关闭 |
 | `fade-in` / `fade-out` | `fade-in 0.5` | 余弦淡入/淡出（秒）；超出音频长度 → 16 |
 | `trim` | `trim 10-25` | 裁剪 [START, END) 秒；区间非法/越界 → 16 |
 | `resample` | `resample 32000` | scipy `resample_poly`（polyphase 抗混叠）；采样率相同为 no-op |
@@ -26,7 +26,7 @@ sunoaux post dsp <wav> --ops "<算子串>" [-o out.wav] [--bit-depth 16|24]
 | `compress` | `compress 3 [-14]` | 软拐点压缩：ratio（≥1）+ 阈值 dBFS（默认 -12） |
 | `expand` | `expand 2 [-30]` | **向下扩展（1.4.0）**：低于阈值的部分按 ratio 衰减（ratio ≥1，=1 恒等；阈值 dBFS 默认 -30）。用于压低底噪/弱段 |
 | `limiter` | `limiter [-0.3] [5]` | **前瞻拐点限幅（1.4.0）**：峰值硬顶在 ceiling dBFS（默认 -0.3）之下，brickwall 有数学保证；lookahead ms（默认 5）+ release 50ms 固定。ceiling ≥0 / lookahead <0 → 16 |
-| `concat` | `concat b.wav [xf=0.5]` | 拼接（可选秒数交叉淡化，等功率余弦）；采样率不一致自动重采样 |
+| `concat` | `concat b.wav [xf=0.5]` | 拼接（可选秒数交叉淡化，等功率余弦）；采样率不一致自动重采样；**声道数不一致 → 16（1.4.6 前置校验，原为裸 ValueError）** |
 | `reverb` | `reverb 0.3 [1.2]` | **混响（R14）**：合成指数衰减噪声 IR + FFT 卷积 + wet/dry（wet ∈ [0,1] 默认 0.3；IR 时长秒 默认 1.2）。wet/时长非法 → 16 |
 
 算子串语法：逗号分隔 `name` / `name 主参数` / `name key=value`，

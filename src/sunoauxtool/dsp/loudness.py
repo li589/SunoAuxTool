@@ -2,8 +2,10 @@
 
 纯 numpy/scipy 实现（无 pyloudnorm 依赖）：
 - K 加权 = stage1 高架滤波（+4dB，高频补偿）+ stage2 RLB 高通（38Hz）
-  —— biquad 系数按 ITU 标准在 48kHz 给定，任意 sr 经 bilinear 公式缩放
-  （与 pyloudnorm 的 ``ITU-R BS.1770`` 滤波器同口径）；
+  —— 从 ITU 原型（G/Q/fc）出发对每个采样率重新做 bilinear 变换
+  （1.4.6 修复：旧实现对 48k 系数做幂次缩放、缺 bilinear 步骤，
+  非 48k 频响有 -2~+6dB 系统性偏置；与 pyloudnorm 的
+  ``ITU-R BS.1770`` 滤波器同口径）；
 - 分块 400ms、步进 100ms（75% 重叠）；
 - 门控：绝对门 -70 LUFS + 相对门（块均值 -10 LU）；
 - 积分响度 LUFS = -0.691 + 10*log10(门控块能量和 / 块数)。
@@ -14,40 +16,75 @@ from __future__ import annotations
 import numpy as np
 from scipy.signal import lfilter
 
-#: ITU-R BS.1770 stage1（高架 shelving）@48kHz 原始系数（b/a）
+#: ITU-R BS.1770 stage1（高架 shelving）@48kHz 原始系数（b/a）——仅作 48k 回归参照
 _STAGE1_48K = {
     "b": [1.53512485958697, -2.69169618940638, 1.19839281085285],
     "a": [1.0, -1.69065929318241, 0.73248077421585],
 }
-#: ITU-R BS.1770 stage2（RLB 高通）@48kHz 原始系数
+#: ITU-R BS.1770 stage2（RLB 高通）@48kHz 原始系数——仅作 48k 回归参照
 _STAGE2_48K = {
     "b": [1.0, -2.0, 1.0],
     "a": [1.0, -1.99004745483398, 0.99007225036621],
 }
-#: 48kHz 双线性参考
+#: 48kHz 双线性参考（测试与文档用）
 _REF_SR = 48000.0
+
+#: ITU-R BS.1770 高架滤波原型（fc=1681.97Hz, G≈+4dB, Q≈0.7072），
+#: pyloudnorm / Adobe BS.1770 实现同源参数
+_STAGE1_PROTO = (1681.974450955533, 3.999843853973347, 0.7071752369554196)
+#: ITU-R BS.1770 RLB 高通原型（fc≈38.13Hz, Q≈0.5003）
+_STAGE2_PROTO = (38.13547087602444, 0.5003270373238773)
+
+
+def _high_shelf_coeffs(
+    sr: float, fc: float, g_db: float, q: float
+) -> tuple[np.ndarray, np.ndarray]:
+    """按 ITU 口径对高架 shelving 做逐 sr 的 bilinear 变换（a[0]=1 归一化）。"""
+    k = float(np.tan(np.pi * fc / sr))
+    vh = 10.0 ** (g_db / 20.0)
+    vb = vh ** 0.4996667741545416  # pyloudnorm 同款带宽修正常数
+    a0 = 1.0 + k / q + k * k
+    b = [
+        (vh + vb * k / q + k * k) / a0,
+        2.0 * (k * k - vh) / a0,
+        (vh - vb * k / q + k * k) / a0,
+    ]
+    a = [1.0, 2.0 * (k * k - 1.0) / a0, (1.0 - k / q + k * k) / a0]
+    return np.asarray(b), np.asarray(a)
+
+
+def _high_pass_coeffs(
+    sr: float, fc: float, q: float
+) -> tuple[np.ndarray, np.ndarray]:
+    """按 ITU 口径对二阶高通做逐 sr 的 bilinear 变换（a[0]=1 归一化）。"""
+    k = float(np.tan(np.pi * fc / sr))
+    a0 = 1.0 + k / q + k * k
+    b = [1.0, -2.0, 1.0]
+    a = [1.0, 2.0 * (k * k - 1.0) / a0, (1.0 - k / q + k * k) / a0]
+    return np.asarray(b), np.asarray(a)
 
 
 def _scale_stage(
     b: list[float], a: list[float], sr: float
 ) -> tuple[np.ndarray, np.ndarray]:
-    """把 48kHz 基准的 biquad 系数缩放到任意采样率（pyloudnorm 同款公式）。
+    """按采样率给出 K 加权某一级的 biquad 系数。
 
-    原理：对 s 域零极点做带宽缩放（p = p * sr / 48000）后重做 bilinear，
-    等价于对多项式根做幂次缩放。
+    实现：不再对 48kHz 系数做幂次缩放（旧实现，非 48k 有 -2~+6dB 系统性偏置），
+    而是从 ITU 原型（G/Q/fc）出发对每个 sr 重新做 bilinear 变换
+    （pyloudnorm ``ITU-R BS.1770`` 滤波器同口径）。``b``/``a`` 参数保留仅为
+    兼容旧签名，实际系数由原型决定。
     """
-    sr_k = sr / _REF_SR
-    b = np.asarray(b, dtype=np.float64)
-    a = np.asarray(a, dtype=np.float64)
-    b_scale = sr_k ** (len(b) - 1 - np.arange(len(b)))
-    a_scale = sr_k ** (len(a) - 1 - np.arange(len(a)))
-    return b * b_scale, a * a_scale
+    del b, a  # 旧签名兼容：系数由原型参数决定
+    fc1, g1, q1 = _STAGE1_PROTO
+    return _high_shelf_coeffs(sr, fc1, g1, q1)
 
 
 def k_weight(audio: np.ndarray, sr: int) -> np.ndarray:
     """K 加权滤波（单声道 (N,) 或多声道 (N, ch)）。"""
-    b1, a1 = _scale_stage(_STAGE1_48K["b"], _STAGE1_48K["a"], sr)
-    b2, a2 = _scale_stage(_STAGE2_48K["b"], _STAGE2_48K["a"], sr)
+    fc1, g1, q1 = _STAGE1_PROTO
+    b1, a1 = _high_shelf_coeffs(sr, fc1, g1, q1)
+    fc2, q2 = _STAGE2_PROTO
+    b2, a2 = _high_pass_coeffs(sr, fc2, q2)
     x = np.atleast_2d(audio.T).T.astype(np.float64)  # (N,) -> (N, 1)
     x = lfilter(b1, a1, x, axis=0)
     x = lfilter(b2, a2, x, axis=0)

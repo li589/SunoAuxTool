@@ -2,6 +2,40 @@
 
 本项目遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.0.0/) 风格。
 
+## [1.4.6] - 2026-10-07（bugfix：审计 B1-B5 修复）
+
+> 来源：`docs/reports/audit-2026-10-07.md` 全项目审计确认的 5 个中等优先级 bug，
+> 全部实测复现后修复并附回归测试。
+
+### 修复
+- **B1 `loudnorm` 峰值保护**（`dsp/ops.py`）：增益后自动串联 `limiter` 把峰值
+  硬顶在 ceiling 之下（默认 -0.3 dBFS）——高动态素材（crest>10，如稀疏脉冲/
+  古典乐）拉响度曾可达峰值 2.0，靠写盘硬 clip 兜底产生削波失真。
+  `ceiling=<dB>` 自定义，`ceiling=off` 显式关闭恢复旧行为。
+- **B2 `tempo.beat_offset` 双重除以 rate**（`analysis/tempo.py`）：0.25s 相位的
+  点击轨曾返回 0.0029s（被 rate 除了两次），`--tempo-grid` 视频节拍对齐必错。
+  同时补上**半窗中心校正**（onset 通量峰按窗起始帧计时，系统性比真实起音提前
+  0~1 窗长）：补偿 `frame/2` 后合成点击轨相位误差从 -64ms 收敛到 ±18ms 内
+  （22050/44100/48000 三档 sr 实测）。相位断言口径改为按拍网格取模。
+- **B3 K 加权系数缺 bilinear 步骤**（`dsp/loudness.py`）：旧实现对 48kHz 系数做
+  幂次缩放，非 48k 频响有 -2.05dB@1kHz（44.1k）/ +5.97dB@100Hz（22.05k）的
+  系统性偏置。改为从 ITU-R BS.1770 原型（G/Q/fc）对每个 sr 重新做 bilinear
+  变换（pyloudnorm 同口径）；48kHz 复现 ITU 手工系数表（rel 1e-5 内）。
+- **B4 `concat` 声道数不匹配无诊断**（`dsp/ops.py`）：mono 拼 stereo 曾抛裸
+  `np.concatenate` ValueError；现在前置校验声道数并抛 `DspParamError(16)`
+  带业务诊断。
+- **B5 错误码表补全**（`exceptions.py` + README）：`ERROR_CODES` 补 10-14
+  （video）与 20-24（download）两段实际在用但漏登记的码；README 错误码表
+  同步补全（原只列到 9）。
+
+### 测试
+- `tests/test_analysis_tempo.py` +1（B2 已知相位回归，0.25s 相位 + 多 sr 验证）。
+- `tests/test_dsp_ops.py` +7（B1 峰值顶限/ceiling=off 旧行为/自定义 ceiling/
+  非法 ceiling；B3 48k 系数回归/频响采样率不变性/LUFS 跨 sr 一致性；
+  B4 声道不匹配双向校验）。
+- `tests/test_error_codes.py` 表完整性断言更新 + video/download 段语义对齐
+  子包异常实际退出码。
+
 ## [1.4.5] - 2026-10-07（DSP 动态处理补全 + 旧包名 shim 移除 + 真实 ffmpeg e2e 测试）
 
 > 原计划拆为 1.4.0（DSP）+ 1.5.0（shim 移除）两版；因 shim 移除改动很小，

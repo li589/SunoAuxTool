@@ -434,3 +434,112 @@ def test_limiter_cli_end_to_end(tmp_path):
     assert out.is_file()
     data, _ = sf.read(out)
     assert float(np.max(np.abs(data))) <= float(10 ** (-1 / 20)) + 1e-4
+
+
+# ---------------------------------------------------------------------------
+# 1.4.6 B1：loudnorm 峰值保护（自动串联 limiter）
+# ---------------------------------------------------------------------------
+
+
+def _impulse_track() -> np.ndarray:
+    """3s 稀疏脉冲轨（每秒 1 个 0.5 幅值脉冲）——crest 极高的高动态素材。"""
+    x = np.zeros(SR * 3, dtype=np.float32)
+    x[::SR] = 0.5
+    return x
+
+
+def test_loudnorm_peak_protection_limits_ceiling():
+    """B1 回归：稀疏脉冲拉到 -16 LUFS 时旧实现峰值可达 2.0（靠写盘硬 clip 削波）；
+    修复后输出峰值被默认 ceiling=-0.3 dBFS 硬顶。"""
+    y, _ = apply_ops(_impulse_track(), SR, parse_ops("loudnorm -16"))
+    assert np.max(np.abs(y)) <= 10 ** (-0.3 / 20) + 1e-4
+
+
+def test_loudnorm_ceiling_off_preserves_legacy_behavior():
+    """ceiling=off 显式关闭保护——恢复 1.4.5 之前的行为（峰值可超 0dBFS）。"""
+    y, _ = apply_ops(_impulse_track(), SR, parse_ops("loudnorm -16 ceiling=off"))
+    assert np.max(np.abs(y)) > 1.0
+
+
+def test_loudnorm_ceiling_custom():
+    y, _ = apply_ops(_impulse_track(), SR, parse_ops("loudnorm -16 ceiling=-6"))
+    assert np.max(np.abs(y)) <= 10 ** (-6 / 20) + 1e-4
+
+
+def test_loudnorm_ceiling_invalid():
+    with pytest.raises(DspParamError):
+        apply_ops(_sine(), SR, parse_ops("loudnorm -16 ceiling=5"))
+    with pytest.raises(DspParamError):
+        apply_ops(_sine(), SR, parse_ops("loudnorm -16 ceiling=abc"))
+
+
+# ---------------------------------------------------------------------------
+# 1.4.6 B3：K 加权逐 sr bilinear 重设计
+# ---------------------------------------------------------------------------
+
+
+def test_k_weight_coeffs_match_itu_at_48k():
+    """B3 回归：重设计在 48kHz 必须复现 ITU 手工系数表（口径不变）。"""
+    from sunoauxtool.dsp import loudness
+
+    fc1, g1, q1 = loudness._STAGE1_PROTO
+    b1, a1 = loudness._high_shelf_coeffs(48000.0, fc1, g1, q1)
+    assert b1 == pytest.approx(loudness._STAGE1_48K["b"], rel=1e-5)
+    assert a1 == pytest.approx(loudness._STAGE1_48K["a"], rel=1e-5)
+    fc2, q2 = loudness._STAGE2_PROTO
+    b2, a2 = loudness._high_pass_coeffs(48000.0, fc2, q2)
+    assert b2 == pytest.approx(loudness._STAGE2_48K["b"], rel=1e-5)
+    assert a2 == pytest.approx(loudness._STAGE2_48K["a"], rel=1e-5)
+
+
+def test_k_weight_response_sample_rate_invariant():
+    """B3 回归：旧实现对非 48k 做幂次缩放（44.1k@1kHz 偏 -2.05dB、
+    22.05k@1kHz 偏 +4.09dB）；bilinear 重设计后任意 sr 的 1kHz 响应一致。"""
+    from scipy.signal import freqz
+
+    from sunoauxtool.dsp import loudness
+
+    def mag_db_1k(sr: float) -> float:
+        fc1, g1, q1 = loudness._STAGE1_PROTO
+        b1, a1 = loudness._high_shelf_coeffs(sr, fc1, g1, q1)
+        fc2, q2 = loudness._STAGE2_PROTO
+        b2, a2 = loudness._high_pass_coeffs(sr, fc2, q2)
+        _, h1 = freqz(b1, a1, worN=[2 * np.pi * 1000.0 / sr])
+        _, h2 = freqz(b2, a2, worN=[2 * np.pi * 1000.0 / sr])
+        return float(20 * np.log10(abs(h1[0] * h2[0])))
+
+    ref = mag_db_1k(48000.0)
+    assert abs(mag_db_1k(44100.0) - ref) < 0.15
+    assert abs(mag_db_1k(22050.0) - ref) < 0.3
+
+
+def test_loudnorm_lufs_sample_rate_consistency():
+    """B3 端到端：同一模拟信号在不同 sr 下测得的 LUFS 应一致（旧实现 44.1k 偏 ~1.5dB）。"""
+    target = -20.0
+    y48, _ = apply_ops(_sine(amp=0.3, sec=3.0), 48000, parse_ops(f"loudnorm {target}"))
+    y44, _ = apply_ops(
+        _sine(amp=0.3, sec=3.0, sr=44100), 44100, parse_ops(f"loudnorm {target}")
+    )
+    assert integrated_lufs(y48, 48000) == pytest.approx(target, abs=0.3)
+    assert integrated_lufs(y44, 44100) == pytest.approx(target, abs=0.3)
+
+
+# ---------------------------------------------------------------------------
+# 1.4.6 B4：concat 声道数不匹配前置校验
+# ---------------------------------------------------------------------------
+
+
+def test_concat_channel_mismatch_raises_16(tmp_path):
+    """B4 回归：mono 拼 stereo 曾裸 np.concatenate ValueError（无业务诊断）。"""
+    mono = np.ones(SR, dtype=np.float32)
+    stereo = 0.5 * np.ones((SR, 2), dtype=np.float32)
+    pm, ps = tmp_path / "m.wav", tmp_path / "s.wav"
+    sf.write(pm, mono, SR, subtype="PCM_16")
+    sf.write(ps, stereo, SR, subtype="PCM_16")
+
+    with pytest.raises(DspParamError) as exc_info:
+        apply_ops(mono, SR, parse_ops(f"concat {ps}"))
+    assert "声道数不匹配" in str(exc_info.value)
+
+    with pytest.raises(DspParamError):
+        apply_ops(stereo, SR, parse_ops(f"concat {pm}"))
