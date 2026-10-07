@@ -102,7 +102,7 @@ suno-cat-catch-resolve                   （独立，CLI 自足；核心层零�
 | `music_theory/inversion.py` | 和弦转位（低音平滑，`InversionResolver`） |
 | `music_theory/rhythm_patterns.py` | 节奏型注册表（`RhythmPatternRegistry`） |
 | `music_theory/postprocess.py` | 生成后处理 |
-| `dsp/filters.py` | `highpass`（低频切 EQ）、`compressor`（轻压缩） |
+| `dsp/filters.py` | `highpass`（低频切 EQ）、`compressor`（轻压缩）、`expander`（向下扩展）、`limiter`（前瞻拐点限幅，brickwall） |
 | `dsp/processor.py` | `DspProcessor` + `DspOptions`（淡入淡出等） |
 | `render/fluidsynth.py` | FluidSynth 真实渲染（`FluidSynthRenderer`） |
 | `export/audio.py` | 通用音频导出 |

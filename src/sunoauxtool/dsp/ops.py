@@ -219,6 +219,35 @@ def op_compress(audio: np.ndarray, sr: int, args: Dict[str, str]) -> Tuple[np.nd
     return filters.compressor(audio, ratio, thr), sr
 
 
+def op_expand(audio: np.ndarray, sr: int, args: Dict[str, str]) -> Tuple[np.ndarray, int]:
+    """向下扩展：``expand 2 [-30]``（ratio须>=1；threshold dBFS 默认 -30）。
+
+    与 compress 相反方向：低于阈值的部分按 ratio 进一步衰减（1.4.0），
+    用于压低底噪/弱段，增强动态对比。ratio=1 时恒等。
+    """
+    ratio = float(args.get("arg", "2"))
+    thr = float(args.get("_1", "-30"))
+    if ratio < 1:
+        raise DspParamError(f"expand ratio 须 >= 1（=1 为恒等）: {ratio}", code=16)
+    return filters.expander(audio, ratio, thr), sr
+
+
+def op_limiter(audio: np.ndarray, sr: int, args: Dict[str, str]) -> Tuple[np.ndarray, int]:
+    """限幅：``limiter [-0.3] [5]``（ceiling dBFS 默认 -0.3；lookahead ms 默认 5）。
+
+    前瞻拐点限幅器（1.4.0）：峰值硬顶在 ceiling 之下（brickwall 有数学保证），
+    release 50ms 固定。混响/限幅同属"可能明显改变音色"的处理，
+    与 reverb 一致只进 standalone ``--ops`` 链，不进 DspProcessor 内部链。
+    """
+    ceiling = float(args.get("arg", "-0.3"))
+    lookahead = float(args.get("_1", "5"))
+    if ceiling >= 0:
+        raise DspParamError(f"limiter ceiling 须 < 0 dBFS: {ceiling}", code=16)
+    if lookahead < 0:
+        raise DspParamError(f"limiter lookahead 须 >= 0 ms: {lookahead}", code=16)
+    return filters.limiter(audio, sr, ceiling_db=ceiling, lookahead_ms=lookahead), sr
+
+
 def op_reverb(audio: np.ndarray, sr: int, args: Dict[str, str]) -> Tuple[np.ndarray, int]:
     """混响：``reverb 0.3 [1.2]``（wet ∈ [0,1] 默认 0.3；IR 时长秒 默认 1.2）。
 
@@ -293,6 +322,8 @@ OPS: Dict[str, OpFunc] = {
     "resample": op_resample,
     "lowcut": op_lowcut,
     "compress": op_compress,
+    "expand": op_expand,
+    "limiter": op_limiter,
     "reverb": op_reverb,
     "concat": op_concat,
 }

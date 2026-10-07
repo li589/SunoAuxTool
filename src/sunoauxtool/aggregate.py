@@ -150,7 +150,8 @@ def fetch_cmd(
 
 @post_app.command(
     "dsp",
-    help="DSP 算子链（R6）：norm/loudnorm/fade-in/fade-out/trim/resample/lowcut/compress/concat",
+    help="DSP 算子链：norm/loudnorm/fade-in/fade-out/trim/resample/lowcut/compress/"
+         "expand/limiter/reverb/concat",
 )
 @_guard
 def dsp_cmd(

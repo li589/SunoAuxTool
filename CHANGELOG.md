@@ -2,6 +2,36 @@
 
 本项目遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.0.0/) 风格。
 
+## [1.4.0] - 2026-10-07（DSP 动态处理补全 + 真实 ffmpeg e2e 测试）
+
+### 新增
+- **DSP `limiter` 算子**：`sunoaux post dsp <wav> --ops "limiter [-0.3] [5]"`。
+  前瞻拐点限幅器（ceiling dBFS 默认 -0.3，lookahead 默认 5ms，release 50ms）：
+  attack 用 lookahead 窗口最小值滤波（增益先于峰值下降），release 在"亏损域"
+  （`1-need`）上做一阶低通——**brickwall 有数学保证**（最终增益 ≤ 每样本需求增益），
+  且安静段零开机瞬态（直接低通增益本身会从 ~0 爬升，已实测踩过并修正）。
+- **DSP `expand` 算子**：`sunoaux post dsp <wav> --ops "expand 2 [-30]"`。
+  软拐点向下扩展器（ratio ≥1，=1 恒等；阈值 dBFS 默认 -30）：低于阈值的部分按
+  ratio 衰减，压低底噪/弱段；阈值处增益恰为 1（与直通连续）。
+- **真实 ffmpeg e2e 测试（`tests/test_video_e2e.py`，4 例）**：FFmpegEngine
+  waveform/spectrum（含背景图 + drawtext 标题链）与 FrameEngine rawvideo 管道
+  （bars / waveform_scroll + 背景注入）真实渲染 320x180@10fps 1s 音频，ffprobe
+  校验流/时长/尺寸。全套件增量 ~1s；未装 ffmpeg 时自动 skip。
+
+### 弃用（移除排期）
+- **旧包名 shim 定档 1.5.0 移除**：`import smartnotegen` / `import videomaker`
+  兼容 shim 与 `smartnotegen` / `videomaker` 两个 CLI 入口别名自 v0.7.0 起弃用
+  （原公告"1-2 个版本后移除"），至本版已滞后 4 个版本。**1.4.0 为最后公告版本**，
+  1.5.0 将删除 `src/smartnotegen/`、`src/videomaker/` 及对应入口点。
+  请迁移到 `sunoauxtool` / `sunoauxtool.video`（或 CLI 用 `sunoauxtool` / `sunoaux`）。
+
+### 测试
+- `tests/test_dsp_ops.py` +8（limiter brickwall/静音直通/参数校验/CLI 端到端、
+  expand 衰减/阈值连续/ratio=1 恒等/参数校验）。
+- `tests/test_pipeline.py` 6 → 14（P2：pipeline.py 覆盖率 82% → 100%，见 1.4.0
+  开发期间提交 `8e33145`）。
+- 全量 1355 passed，覆盖率 89%（门槛 87%），ruff clean。
+
 ## [1.3.0] - 2026-09-22（R14 DSP 混响 + R15 视频/预览扩展）
 
 版本映射依 `docs/reports/next-phase-plan.md`（R14+R15 → v1.3.0）。

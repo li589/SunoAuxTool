@@ -1,7 +1,7 @@
 """sunoauxtool.video 单元测试（v0.2.0 W5）。
 
 覆盖：analysis 预计算 / visualizer 工厂 / compositor 路由 / presets / config。
-真实 ffmpeg 渲染的端到端冒烟见 test_sunoauxtool.video_e2e.py（标记 slow）。
+真实 ffmpeg 渲染的端到端冒烟见 test_video_e2e.py（1.4.0）。
 """
 
 from __future__ import annotations

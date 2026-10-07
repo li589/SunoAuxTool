@@ -12,7 +12,8 @@ v1.0.0 起统一为单一发行版 `sunoauxtool`）。
 
 > 模块布局（单包多子模块）：`sunoauxtool`（核心：生成/谱面/分析/导出）·
 > `sunoauxtool.video`（原 videomaker）· `sunoauxtool.download`（DownloadHelper，
-> 原 Suno-Cat-Catch-Resolve）· 旧包名 `smartnotegen` / `videomaker` 以兼容 shim 保留。
+> 原 Suno-Cat-Catch-Resolve）· 旧包名 `smartnotegen` / `videomaker` 兼容 shim
+> **将于 1.5.0 移除**（1.4.0 为最后公告版本），请迁移到新包名。
 > **完整功能清单（命令树、模块能力、错误码总表）见 [docs/features.md](docs/features.md)**。
 
 ---

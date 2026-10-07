@@ -365,3 +365,72 @@ def test_dsp_processor_still_rejects_reverb_compliance_boundary(tmp_path):
         DspProcessor().process(str(src), DspOptions(reverb=True), str(tmp_path / "o.wav"))
     assert ei.value.code == 1
     assert "standalone" in str(ei.value)
+
+
+# -- expand（1.4.0 向下扩展） ---------------------------------------------
+
+
+def test_expand_attenuates_below_threshold():
+    """低于阈值的部分按 ratio 衰减；高于阈值不动。"""
+    x = _sine(sec=1.0, amp=0.5)  # 峰值 0.5 = -6dBFS
+    y, _ = apply_ops(x, SR, parse_ops("expand 2 -12"))
+    # 0.5 > 阈值(0.251) 的样本不动：整体峰值不变
+    assert np.isclose(np.max(np.abs(y)), np.max(np.abs(x)), atol=1e-4)
+    # 弱段（正弦过零附近 level < 阈值）被压低：RMS 下降
+    assert float(np.sqrt(np.mean(y**2))) < float(np.sqrt(np.mean(x**2)))
+
+
+def test_expand_continuous_at_threshold_and_ratio1_noop():
+    """阈值处增益恰为 1（连续）；ratio=1 恒等。"""
+    thr_db = -12.0
+    x = _sine(sec=0.5, amp=float(10 ** (thr_db / 20)))  # 峰值恰在阈值
+    y, _ = apply_ops(x, SR, parse_ops(f"expand 2 {thr_db}"))
+    assert np.isclose(np.max(np.abs(y)), np.max(np.abs(x)), atol=1e-4)
+
+    y1, _ = apply_ops(_sine(sec=0.5), SR, parse_ops("expand 1 -30"))
+    assert np.allclose(y1, _sine(sec=0.5), atol=1e-6)
+
+
+def test_expand_invalid_ratio_exit_16():
+    with pytest.raises(DspParamError):
+        apply_ops(_sine(sec=0.2), SR, parse_ops("expand 0.5"))
+
+
+# -- limiter（1.4.0 前瞻限幅） ---------------------------------------------
+
+
+def test_limiter_brickwall():
+    """峰值被硬顶在 ceiling 之下（含瞬态过冲样本），brickwall 性质成立。"""
+    x = _sine(sec=0.5, amp=1.0)  # 峰值 1.0 = 0dBFS，必被压
+    y, _ = apply_ops(x, SR, parse_ops("limiter -0.3"))
+    ceiling = float(10 ** (-0.3 / 20))
+    assert float(np.max(np.abs(y))) <= ceiling + 1e-4
+    # 波形没被摧毁：与限幅后的理论包络强相关（粗查：能量仍在）
+    assert float(np.max(np.abs(y))) > ceiling * 0.9  # 峰值贴着天花板
+
+
+def test_limiter_quiet_signal_untouched():
+    """低于 ceiling 的信号增益恒 1（不压不抬）。"""
+    x = _sine(sec=0.5, amp=0.1)  # -20dBFS，远低于 -0.3dBFS ceiling
+    y, _ = apply_ops(x, SR, parse_ops("limiter"))
+    assert np.allclose(y, x, atol=1e-6)
+
+
+def test_limiter_invalid_params_exit_16():
+    with pytest.raises(DspParamError):
+        apply_ops(_sine(sec=0.2), SR, parse_ops("limiter 0"))  # ceiling >= 0
+    with pytest.raises(DspParamError):
+        apply_ops(_sine(sec=0.2), SR, parse_ops("limiter -0.3 -1"))  # lookahead < 0
+
+
+def test_limiter_cli_end_to_end(tmp_path):
+    src = tmp_path / "in.wav"
+    sf.write(src, _sine(sec=1.0, amp=1.0), SR, subtype="PCM_16")
+    out = tmp_path / "lim.wav"
+    result = runner.invoke(
+        app, ["post", "dsp", str(src), "--ops", "limiter -1", "-o", str(out)]
+    )
+    assert result.exit_code == 0, result.output
+    assert out.is_file()
+    data, _ = sf.read(out)
+    assert float(np.max(np.abs(data))) <= float(10 ** (-1 / 20)) + 1e-4
