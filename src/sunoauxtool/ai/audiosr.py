@@ -29,7 +29,8 @@ _INSTALL_GUIDE = (
     "方式一：克隆上游仓库到 src/versatile_audio_super_resolution（默认探测路径）\n"
     "  git clone https://github.com/haoheliu/versatile_audio_super_resolution\n"
     "方式二：设环境变量 AUDIOSR_DIR 指向任意 audiosr 源码目录\n"
-    "依赖（torch/torchaudio 等）见 requirements/vasr.txt；首次运行自动下载约 2.6GB 权重。"
+    "依赖（torch/torchaudio 等）见 requirements/vasr.txt；首次运行自动下载约 2.6GB 权重。\n"
+    "网络：直连 huggingface.co 不通时设 HF_ENDPOINT=https://hf-mirror.com（国内镜像）。"
 )
 
 _DEFAULT_DIR = Path(__file__).resolve().parents[2] / "versatile_audio_super_resolution"
@@ -155,7 +156,16 @@ class AudioSRAdapter:
         except AiDependencyError:
             raise
         except Exception as exc:
-            raise AiDependencyError(f"AudioSR 推理失败: {exc}", code=6) from exc
+            hint = ""
+            # huggingface.co 直连不通（本机被墙）时给出镜像指引；
+            # 否则用户只会看到一串 ConnectTimeout，不知道怎么修。
+            if "huggingface.co" in str(exc) or "timed out" in str(exc):
+                hint = (
+                    "；网络提示：直连 huggingface.co 超时，"
+                    "设 HF_ENDPOINT=https://hf-mirror.com 走国内镜像；"
+                    "权重已缓存后可加 HF_HUB_OFFLINE=1 跳过联网校验"
+                )
+            raise AiDependencyError(f"AudioSR 推理失败: {exc}{hint}", code=6) from exc
 
         out = Path(output_path)
         out.parent.mkdir(parents=True, exist_ok=True)

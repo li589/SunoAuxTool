@@ -16,7 +16,7 @@
 
 4. **docs 整理**
    - 14 个历史规划/过程文档（PRD*/task-plan*/QA-acceptance*/research-P3/plan-*/旧 mermaid/architecture-P1P2）归档至 `docs/archive/`。
-   - 保留在线文档：`usage.md`、`architecture.md`、`architecture-P3.md`、`ai-integration.md`。
+   - 保留在线文档：`usage.md`、`ai-integration.md`（`architecture.md`/`architecture-P3.md` 已于 2026-09-22 归档至 `docs/archive/`）。
 
 5. **环境就绪验证**
    - `doctor`：Python / FluidSynth / 双 SoundFont / torch / CUDA / audiocraft / espeak 全部 ✅，结论「全部正常」。

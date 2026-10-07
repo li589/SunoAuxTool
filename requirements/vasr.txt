@@ -25,6 +25,18 @@
 # 整首歌（5:13）参考耗时：~45 分钟 GPU（25 个 15s 块，1.8s/it ~ 0.2s/it 视内容而定）。
 # 注意：输出为**单声道 48kHz**（上游把立体声混单声道，上游行为）。
 #
+# 2026-10-07 复验（P1 评估，py3.12 主 venv + RTX 4060）：
+#   - **主 venv 直接可用，无需 Py3.9 隔离**（早期"audiosr 需要 Py3.9"的结论已作废——
+#     那是 pip 包路线的限制；本项目走源码目录模式，torch 2.5.1+cu121 下 import/推理全通）。
+#   - 8s@12kHz PCM_16 -> 8.00s@48kHz PCM_24 单声道，时长精确对齐；DDIM50 单块 ~19.5s。
+#   - **网络坑**：import 即连 huggingface.co（roberta-base tokenizer HEAD 校验），
+#     本机直连不通 → 5 轮重试 ~25s 后回退缓存。必须设 HF_ENDPOINT=https://hf-mirror.com；
+#     权重已缓存（~/.cache/huggingface/hub/models--haoheliu--audiosr_basic）后可加
+#     HF_HUB_OFFLINE=1。适配器已对该超时加镜像指引（AiDependencyError 内嵌提示）。
+#   - 评估结论：**不接入 pipeline**——推理耗时随音频时长线性放大（5 分钟歌 ~45 分钟 GPU），
+#     会拖垮批量创作链；且扩散模型超分会改变音频内容，与 pipeline 确定性输出/Suno 合规
+#     边界（显式、用户主动）冲突。保持 standalone `sunoaux post enhance`。
+#
 # 本地补丁（R9 起纳入版本控制，见 patches/vasr_super_resolution_long_audio.patch）：
 #   audiosr/pipeline.py::super_resolution_long_audio 的 [SunoAuxTool patch R5]
 #   —— 修复末块短于 overlap 时 fade 切片越界 + overlap-add 广播失败

@@ -158,3 +158,44 @@ def test_enhance_passes_chunk_overlap_and_writes(fake_audiosr, tmp_path):
     assert kw["overlap_duration_s"] == 2.0
     assert kw["ddim_steps"] == 20
     assert kw["seed"] == 42
+
+
+# -- 网络错误镜像提示（2026-10-07 P1 评估） ------------------------------
+
+
+def test_enhance_hf_timeout_hint(fake_audiosr, tmp_path, monkeypatch):
+    """huggingface.co 超时 → AiDependencyError 内嵌 HF_ENDPOINT 镜像指引。"""
+    import audiosr as audiosr_pkg
+
+    def _boom(*a, **k):
+        raise RuntimeError(
+            "HTTPSConnectionPool(host='huggingface.co', port=443): "
+            "Read timed out. (read timeout=10)"
+        )
+
+    monkeypatch.setattr(audiosr_pkg, "super_resolution_long_audio", _boom)
+    src = tmp_path / "in.wav"
+    _write_mono_wav(src)
+    adapter = mod.AudioSRAdapter()
+    with pytest.raises(AiDependencyError) as ei:
+        adapter.enhance(str(src), str(tmp_path / "o.wav"))
+    assert ei.value.code == 6
+    assert "HF_ENDPOINT" in str(ei.value)
+    assert "hf-mirror.com" in str(ei.value)
+
+
+def test_enhance_generic_error_no_hf_hint(fake_audiosr, tmp_path, monkeypatch):
+    """与网络无关的推理错误不加镜像提示（避免噪音误导排查方向）。"""
+    import audiosr as audiosr_pkg
+
+    def _boom(*a, **k):
+        raise RuntimeError("CUDA out of memory")
+
+    monkeypatch.setattr(audiosr_pkg, "super_resolution_long_audio", _boom)
+    src = tmp_path / "in.wav"
+    _write_mono_wav(src)
+    adapter = mod.AudioSRAdapter()
+    with pytest.raises(AiDependencyError) as ei:
+        adapter.enhance(str(src), str(tmp_path / "o.wav"))
+    assert ei.value.code == 6
+    assert "HF_ENDPOINT" not in str(ei.value)

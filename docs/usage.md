@@ -251,6 +251,25 @@ sunoauxtool video-preview <video> [--frames 6] [-o out_dir]
   与既有音频/视频产物不冲突；`<out>` 留空时取配置里的 `paths.output_dir`。
 - 依赖 ffmpeg/ffprobe；视频不存在退出码 3。
 
+### 2.14 `post enhance` — AudioSR 音质提升（R5）
+
+```bash
+sunoaux post enhance <wav> [-o out.wav] [--model basic|speech] [--seed 42]
+                         [--steps 50] [--chunk 15.0] [--overlap 2.0]
+```
+
+- 音频超分/高频重建（**不是人声分离**）：12kHz/24kHz 低清素材 → 48kHz PCM_24；
+  长音频自动分块（15s 块 / 2s Hann 重叠交叉淡化），输出为**单声道**（上游行为）。
+- 依赖走源码目录模式（`src/versatile_audio_super_resolution` 或 `AUDIOSR_DIR`），
+  权重首次运行自动下载（~2.6GB，模型 `haoheliu/audiosr_basic`）；未装退出码 6。
+- **耗时参考（RTX 4060，2026-10-07 实测）**：8s@12kHz 单块 DDIM50 ≈ 19.5s（纯推理）；
+  整首歌按 15s 分块线性放大（5 分钟歌约 45 分钟 GPU），**只适合对成品单曲做精修**，
+  不要放进批量/流水线。
+- **网络**：权重/tokenizer 校验走 huggingface.co，直连不通时**必须设镜像**：
+  `HF_ENDPOINT=https://hf-mirror.com`；权重已缓存后可加 `HF_HUB_OFFLINE=1` 跳过联网校验。
+  未设镜像时每次加载会先卡 5 轮重试（~25s）再回退缓存。
+- 安装细节与验证记录见 `requirements/vasr.txt`。
+
 ---
 
 ## 3. 配置文件详解
