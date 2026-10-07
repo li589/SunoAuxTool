@@ -230,9 +230,12 @@ def enhance_cmd(
     typer.echo(f"✅ 音质提升完成: {written}")
 
 
-video_app = typer.Typer(help="音乐视频（= videomaker）", no_args_is_help=True)
+video_app = typer.Typer(help="音乐视频（sunoauxtool.video，原 videomaker）", no_args_is_help=True)
 video_app.command("render")(video_cli.render)
 video_app.command("multi")(video_cli.multi)
+video_app.command("presets")(video_cli.presets)
+video_app.command("config")(video_cli.config)
+video_app.command("version")(video_cli.version)
 post_app.add_typer(video_app, name="video")
 
 app.add_typer(post_app, name="post")

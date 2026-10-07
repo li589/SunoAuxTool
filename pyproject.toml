@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "sunoauxtool"
-version = "1.4.0"
+version = "1.4.5"
 description = "SunoAuxTool：Suno/海绵音乐/网易天音等 AI 音乐工具的前期+后期处理工具箱（生成/谱面/互转 + 下载/转码/DSP/视频/音质增强）"
 readme = "README.md"
 requires-python = ">=3.12"
@@ -30,9 +30,8 @@ dev = ["pytest==9.1.1", "pytest-cov==7.1.0", "ruff==0.11.0"]
 [project.scripts]
 sunoaux = "sunoauxtool.aggregate:app"        # 聚合入口（pre/post，R3）
 sunoauxtool = "sunoauxtool.cli:app"
-smartnotegen = "sunoauxtool.cli:app"        # 旧入口名；1.4.0 最后公告，1.5.0 移除
-videomaker = "sunoauxtool.video.cli:app"    # 旧入口名；1.4.0 最后公告，1.5.0 移除
 downloadhelper = "sunoauxtool.download.cli:app"
+# 旧入口别名 smartnotegen / videomaker 已于 1.4.5 移除（1.4.0 最后公告）。
 
 [tool.setuptools.packages.find]
 where = ["src"]

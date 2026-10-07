@@ -12,8 +12,8 @@ v1.0.0 起统一为单一发行版 `sunoauxtool`）。
 
 > 模块布局（单包多子模块）：`sunoauxtool`（核心：生成/谱面/分析/导出）·
 > `sunoauxtool.video`（原 videomaker）· `sunoauxtool.download`（DownloadHelper，
-> 原 Suno-Cat-Catch-Resolve）· 旧包名 `smartnotegen` / `videomaker` 兼容 shim
-> **将于 1.5.0 移除**（1.4.0 为最后公告版本），请迁移到新包名。
+> 原 Suno-Cat-Catch-Resolve）。旧包名 `smartnotegen` / `videomaker` 兼容 shim
+> 已于 **1.4.5 移除**，请使用新包名。
 > **完整功能清单（命令树、模块能力、错误码总表）见 [docs/features.md](docs/features.md)**。
 
 ---
@@ -28,7 +28,7 @@ python -m venv venv
 venv\Scripts\activate
 pip install -r requirements/base.txt      # P0 运行依赖（不含 torch）
 pip install -r requirements/dev.txt       # 开发依赖（pytest 等）
-pip install -e .                          # 安装 sunoauxtool 命令（含 smartnotegen/videomaker/downloadhelper 兼容入口）
+pip install -e .                          # 安装 sunoauxtool / sunoaux / downloadhelper 命令
 ```
 
 ### 2. Windows 外部程序（渲染必需）
@@ -64,7 +64,7 @@ sunoauxtool pipeline
 ```bash
 sunoaux pre midi --chords C-G-Am-F      # = sunoauxtool generate midi
 sunoaux post convert cache/song.mp3     # = downloadhelper decode（fMP4 转码）
-sunoaux post video render song.wav      # = videomaker render（音乐视频）
+sunoaux post video render song.wav      # = sunoauxtool.video 渲染（音乐视频）
 ```
 
 ---
@@ -106,29 +106,29 @@ sunoaux post video render song.wav      # = videomaker render（音乐视频）
 
 ---
 
-## videomaker 子项目（音乐视频生成器）
+## 音乐视频（sunoauxtool.video，原 videomaker）
 
 > 把 SunoAuxTool 产出的音频一键合成**可发布的音乐视频 / 音频可视化**，
-> 适配抖音/YouTube/Instagram/官网四大平台。非 AI，独立包，依赖 SunoAuxTool（单向）。
+> 适配抖音/YouTube/Instagram/官网四大平台。非 AI，已并入主包。
 
 **输入格式**：WAV / MP3 / FLAC / OGG / **MIDI**（MIDI 自动用 FluidSynth 渲染）
 **能力**：多轨混音（增益/声像/归一化）、分轨可视化、滚动谱面（五线谱/简谱）、8 种视觉效果、多平台批量
 
 ```bash
-videomaker render ... 命令随 `pip install -e .` 一并安装（兼容入口保留）
+sunoaux post video render ... 命令随 `pip install -e .` 一并安装
 
 # 抖音竖屏波形
-videomaker render output/.../x.wav --preset douyin --style waveform
+sunoaux post video render output/.../x.wav --preset douyin --style waveform
 
 # MIDI 直接出视频（自动渲染）
-videomaker render song.mid -p youtube -s circular_spectrum
+sunoaux post video render song.mid -p youtube -s circular_spectrum
 
 # 多轨混音 + 分轨可视化（WAV/MP3/MIDI 可混用，同产混音 WAV）
-videomaker render drums.wav "bass.mid:gain=0.8:pan=-0.3" melody.mp3 \
+sunoaux post video render drums.wav "bass.mid:gain=0.8:pan=-0.3" melody.mp3 \
     -p douyin -s tracks --title "三轨混音"
 
 # 一次产出全部平台 + Logo 水印 + 标题
-videomaker multi x.wav --presets douyin,youtube,instagram,official \
+sunoaux post video multi x.wav --presets douyin,youtube,instagram,official \
     --style circular_spectrum --logo logo.png
 
 # 8 种视觉效果：waveform / spectrum / circular_spectrum / reactive / tracks / waveform_scroll / score / bars
@@ -169,7 +169,7 @@ downloadhelper batch  ./downloads -o ./out       # 批量，密文自动跳过
 > **命名**：三包合一后本子包为 **`sunoauxtool.download`**（CLI 入口 **`downloadhelper`**）。
 > 旧目录名 `Suno-Cat-Catch-Resolve`、旧入口 `suno-cat-catch-resolve` 与旧 import 名
 > `suno_cat_catch_resolve` 均已移除，无兼容 shim——请改用上面的 `downloadhelper` 命令
-> 与 `import sunoauxtool.download`（旧名 `smartnotegen` / `videomaker` 才有 shim）。
+> 与 `import sunoauxtool.download`（`smartnotegen` / `videomaker` shim 亦已于 1.4.5 移除）。
 
 详见 [docs/downloadhelper.md](docs/downloadhelper.md)（三包合一后子包位于
 `src/sunoauxtool/download/`，原 `src/Suno-Cat-Catch-Resolve/` 目录已移除）。

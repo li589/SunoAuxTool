@@ -7,7 +7,7 @@ v0.3：支持 WAV/MP3/FLAC/OGG/MIDI 多格式输入与多轨混音、分轨可�
 
 from __future__ import annotations
 
-__version__ = "1.4.0"
+__version__ = "1.4.5"
 __all__ = ["__version__"]
 
 # 顶层导入，方便使用

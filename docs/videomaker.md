@@ -10,7 +10,7 @@
 
 ```bash
 # 前置：已安装 SunoAuxTool（同 venv）
-随主包安装：`pip install -e .`（videomaker 入口兼容保留）
+随主包安装：`pip install -e .`（原 `videomaker` 入口已于 1.4.5 移除，统一用 `sunoaux post video`）
 
 # 外部依赖
 ffmpeg --version   # 需在 PATH，或配置 [paths] ffmpeg 指定绝对路径
@@ -20,20 +20,20 @@ ffmpeg --version   # 需在 PATH，或配置 [paths] ffmpeg 指定绝对路径
 
 ```bash
 # 抖音竖屏波形视频
-videomaker render music.wav --preset douyin --style waveform
+sunoaux post video render music.wav --preset douyin --style waveform
 
 # MIDI 直接生成视频（自动 FluidSynth 渲染，用 module/ 下的真实引擎 + SoundFont）
-videomaker render song.mid -p youtube -s circular_spectrum
+sunoaux post video render song.mid -p youtube -s circular_spectrum
 
 # 多轨混音 + 分轨可视化（WAV/MP3/MIDI 可混用）
-videomaker render drums.wav "bass.mid:gain=0.8:pan=-0.3" melody.mp3 \
+sunoaux post video render drums.wav "bass.mid:gain=0.8:pan=-0.3" melody.mp3 \
     -p douyin -s tracks --title "分轨混音"
 
 # 一次产出全部 4 个平台
-videomaker multi music.wav --presets douyin,youtube,instagram,official --style circular_spectrum
+sunoaux post video multi music.wav --presets douyin,youtube,instagram,official --style circular_spectrum
 
 # 带标题 + Logo 水印
-videomaker render music.wav -p youtube -s spectrum --title "我的曲子" --logo logo.png
+sunoaux post video render music.wav -p youtube -s spectrum --title "我的曲子" --logo logo.png
 ```
 
 ---
@@ -42,11 +42,11 @@ videomaker render music.wav -p youtube -s spectrum --title "我的曲子" --logo
 
 | 命令 | 用途 | 示例 |
 |---|---|---|
-| `render` | 视频渲染（多文件=多轨混音） | `videomaker render a.wav -p douyin -s waveform` |
-| `multi` | 多平台批量渲染 | `videomaker multi a.wav --presets douyin,youtube` |
-| `presets` | 列出平台预设 | `videomaker presets` / `videomaker presets -n douyin` |
-| `config` | 配置管理 | `videomaker config init` / `videomaker config show` |
-| `--version` | 版本 | `videomaker --version` |
+| `render` | 视频渲染（多文件=多轨混音） | `sunoaux post video render a.wav -p douyin -s waveform` |
+| `multi` | 多平台批量渲染 | `sunoaux post video multi a.wav --presets douyin,youtube` |
+| `presets` | 列出平台预设 | `sunoaux post video presets` / `sunoaux post video presets -n douyin` |
+| `config` | 配置管理 | `sunoaux post video config init` / `sunoaux post video config show` |
+| `--version` | 版本 | `sunoaux post video version` |
 
 ### render 参数
 
@@ -114,7 +114,7 @@ MIDI 渲染资源（默认路径，可显式覆盖）：
 
 ```bash
 # 单个 MIDI → 视频（自动渲染，19s MIDI 约 20s 出片）
-videomaker render song.mid -p youtube -s circular_spectrum
+sunoaux post video render song.mid -p youtube -s circular_spectrum
 ```
 
 ## 多轨混音（v0.3）
@@ -122,7 +122,7 @@ videomaker render song.mid -p youtube -s circular_spectrum
 `render` 传入**多个文件**即自动进入多轨模式：
 
 ```bash
-videomaker render drums.wav "bass.mid:gain=0.8:pan=-0.3" "melody.mp3:gain=1.2:pan=0.4" \
+sunoaux post video render drums.wav "bass.mid:gain=0.8:pan=-0.3" "melody.mp3:gain=1.2:pan=0.4" \
     -p douyin -s tracks --title "三轨混音"
 ```
 
@@ -170,10 +170,10 @@ videomaker render drums.wav "bass.mid:gain=0.8:pan=-0.3" "melody.mp3:gain=1.2:pa
 
 ```bash
 # 输入本身是 MIDI：谱面数据自动取自输入
-videomaker render song.mid -p douyin --style score --tempo-grid
+sunoaux post video render song.mid -p douyin --style score --tempo-grid
 
 # 输入是渲染后的 WAV：用 --score-midi 指向对应 MIDI（否则报错）
-videomaker render song.wav -p youtube --style score --score-midi song.mid --notation jianpu
+sunoaux post video render song.wav -p youtube --style score --score-midi song.mid --notation jianpu
 ```
 
 > 说明：谱面为可视化简化谱（不带符干/连杠/调号聚合），深度排版请用
@@ -183,7 +183,7 @@ videomaker render song.wav -p youtube --style score --score-midi song.mid --nota
 
 ## 配置文件
 
-`videomaker config init` 生成 `videomaker.toml`：
+`sunoaux post video config init` 生成 `videomaker.toml`：
 
 ```toml
 [paths]
