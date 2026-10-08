@@ -29,7 +29,7 @@ PathLike = str | Path
 
 _MAGIC = b"CTENFDAM"
 _CORE_KEY = bytes.fromhex("687A4852416D736F356B496E62617857")
-_META_KEY = bytes.fromhex("2333466C6A6B5F215C5D2630553C2728")
+_META_KEY = bytes.fromhex("2331346C6A6B5F215C5D2630553C2728")
 _KEY_PREFIX = b"neteasecloudmusic"
 _META_PREFIX = b"music:"
 _META_XOR_PREFIX = b"163 key(Don't modify):"

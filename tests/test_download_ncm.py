@@ -106,8 +106,8 @@ class TestRc4Stream:
 # 容器：自打包往返
 # ---------------------------------------------------------------------------
 
-_CORE_KEY = bytes.fromhex("687A4852416D736F356B496E62617857")
-_META_KEY = bytes.fromhex("2333466C6A6B5F215C5D2630553C2728")
+# 密钥常量直接从产品模块导入（单一事实来源，防止 pack/unpack 密钥漂移）
+from sunoauxtool.download.ncm.unpack import _CORE_KEY, _META_KEY  # noqa: E402
 
 
 def _pack_ncm(rc4_key: bytes, meta: dict, image: bytes | None, payload: bytes) -> bytes:
@@ -187,6 +187,29 @@ class TestContainerRoundtrip:
         name = suggested_filename(content)
         assert "/" not in name and ":" not in name
         assert name.endswith(".flac")
+
+
+class TestMetaKey:
+    def test_meta_key_matches_reference(self):
+        """锁定 _META_KEY 字节：对齐 ncmdump 参考实现 sModifyKey（ncmcrypt.cpp）。
+
+        曾因字节 3-4 抄错（3346 ≠ 3134）导致真实 NCM 元数据解密报
+        「PKCS#7: 填充非法」、文件名退化为 untitled。此测试防止回归。
+        """
+        from sunoauxtool.download.ncm.unpack import _CORE_KEY, _META_KEY
+
+        assert _META_KEY == bytes.fromhex("2331346C6A6B5F215C5D2630553C2728")
+        # 核心密钥一并锁定：对应参考实现 sCoreKey
+        assert _CORE_KEY == bytes.fromhex("687A4852416D736F356B496E62617857")
+
+    def test_real_style_meta_decrypts(self):
+        """用参考密钥加密的元数据段必须能被 parse 解出（加密端同用 _META_KEY，
+        故此测试验证 roundtrip 一致性；密钥错位时解密在 pkcs7_unpad 处爆炸）。"""
+        rc4_key = bytes(range(1, 17))
+        meta = {"musicName": "真实验证", "format": "mp3"}
+        container = _pack_ncm(rc4_key, meta, None, b"ID3" + b"\x00" * 16)
+        content = parse(container)
+        assert content.music_name == "真实验证"
 
 
 class TestContainerErrors:
