@@ -1,0 +1,47 @@
+name: Publish to PyPI
+
+# 1.5.3 起：tag（v*）推送时构建 sdist+wheel 并发布到 PyPI。
+# 首次使用前需在 PyPI 配置 Trusted Publisher（一次性）：
+#   pypi.org → 项目管理 → Publishing → GitHub → li589/SunoAuxTool，
+#   workflow 名 publish.yml，environment 名留空或填 pypi。
+# 备选：仓库 Secrets 配置 PYPI_TOKEN 后，把 publish 步骤换成注释里的 token 版本。
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Build sdist + wheel
+        run: python -m pip install build twine && python -m build
+      - name: Metadata check
+        run: python -m twine check dist/*
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+  publish:
+    needs: build
+    runs-on: ubuntu-24.04
+    permissions:
+      id-token: write # PyPI trusted publishing（OIDC）
+    environment: pypi
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+      - name: Publish（trusted publishing）
+        uses: pypa/gh-action-pypi-publish@release/v1
+      # Token 兜底（未配置 trusted publishing 时启用，并删除上面的步骤）：
+      # - uses: pypa/gh-action-pypi-publish@release/v1
+      #   with:
+      #     password: ${{ secrets.PYPI_TOKEN }}

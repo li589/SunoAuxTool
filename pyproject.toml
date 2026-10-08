@@ -4,13 +4,23 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "sunoauxtool"
-version = "1.5.2"
+version = "1.5.3"
 description = "SunoAuxTool：Suno/海绵音乐/网易天音等 AI 音乐工具的前期+后期处理工具箱（生成/谱面/互转 + 下载/转码/DSP/视频/音质增强）"
 readme = "README.md"
 requires-python = ">=3.12"
 license = { text = "MIT" }
 authors = [{ name = "SunoAuxTool Team" }]
 keywords = ["music", "midi", "suno", "music21", "fluidsynth", "video", "audiosr"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Environment :: Console",
+    "Intended Audience :: End Users/Desktop",
+    "Operating System :: Microsoft :: Windows",
+    "Operating System :: POSIX :: Linux",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Multimedia :: Sound/Audio",
+    "Topic :: Multimedia :: Video",
+]
 dependencies = [
     "typer==0.27.1",
     "music21==10.5.0",
@@ -22,6 +32,11 @@ dependencies = [
     "tomli-w==1.2.0",
     "pillow>=10.0.0",
 ]
+
+[project.urls]
+Homepage = "https://github.com/li589/SunoAuxTool"
+Repository = "https://github.com/li589/SunoAuxTool"
+Changelog = "https://github.com/li589/SunoAuxTool/blob/main/CHANGELOG.md"
 
 [project.optional-dependencies]
 mp3 = ["lameenc==1.8.4"]

@@ -31,6 +31,10 @@ pip install -r requirements/dev.txt       # 开发依赖（pytest 等）
 pip install -e .                          # 安装 sunoauxtool / sunoaux / downloadhelper 命令
 ```
 
+> **从 PyPI 安装（1.5.3 起）**：推 `v*` tag 时 CI 自动构建并发布到 PyPI，
+> 之后可直接 `pip install sunoauxtool`。PyPI 侧需一次性配置 Trusted
+> Publisher（`.github/workflows/publish.yml` 顶部有说明；token 兜底见注释）。
+
 ### 2. Windows 外部程序（渲染必需）
 
 | 程序 | 安装方式 |

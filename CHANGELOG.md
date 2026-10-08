@@ -2,6 +2,17 @@
 
 本项目遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.0.0/) 风格。
 
+## [1.5.3] - 2026-10-09（PyPI 发布管道）
+
+### 新增
+- **`.github/workflows/publish.yml`**：推 `v*` tag → build（sdist+wheel）→
+  twine check → PyPI 发布（Trusted Publishing / OIDC，token 兜底见注释）。
+  首次使用需在 PyPI 一次性登记 pending publisher。
+- pyproject 打包元数据补齐：classifiers（状态/平台/主题）+ project.urls
+  （Homepage/Repository/Changelog）。
+- 本地已验证 `python -m build`：wheel 含全部 13 个子包 + 3 个 console_scripts
+  入口点（sunoaux / sunoauxtool / downloadhelper），twine 元数据口径正确。
+
 ## [1.5.2] - 2026-10-09（L5 性能债：highpass 向量化）
 
 ### 修复
