@@ -11,11 +11,13 @@
 from __future__ import annotations
 
 import json
+import subprocess
 import struct
 from pathlib import Path
 
 import pytest
 
+from sunoauxtool.download.transcoder import find_ffmpeg
 from sunoauxtool.download.ncm import (
     CorruptNcmError,
     NotNcmError,
@@ -240,3 +242,80 @@ class TestRealSample:
         # 签名即格式判定：读头部魔数
         head = audio.read_bytes()[:4]
         assert head[:4] == b"fLaC" or head[:3] == b"ID3" or head[:2] == b"\xff\xfb"
+
+
+# ---------------------------------------------------------------------------
+# 1.6.2：batch 混合扫描 + 标签/封面嵌入
+# ---------------------------------------------------------------------------
+
+
+class TestBatchIncludeNcm:
+    def test_batch_mixed_directory(self, tmp_path, capsys):
+        """目录里同时有 fMP4 与 .ncm：--include-ncm 时两类都处理。"""
+        from typer.testing import CliRunner
+        from sunoauxtool.download.cli import app
+
+        # 布置：1 个 .ncm（自打包）+ 1 个无关文件
+        container = _pack_ncm(b"k" * 16, {"musicName": "batchtest"}, None, b"fLaC" + b"\x00" * 64)
+        (tmp_path / "song.ncm").write_bytes(container)
+        (tmp_path / "readme.txt").write_text("x")
+        outdir = tmp_path / "out"
+
+        runner = CliRunner()
+        result = runner.invoke(app, ["batch", str(tmp_path), "-o", str(outdir), "--include-ncm"])
+        assert result.exit_code == 0, result.output
+        assert "NCM 解包成功 1" in result.output
+        assert (outdir / "batchtest.flac").is_file()
+
+    def test_batch_without_flag_ignores_ncm(self, tmp_path):
+        from typer.testing import CliRunner
+        from sunoauxtool.download.cli import app
+
+        container = _pack_ncm(b"k" * 16, {"musicName": "ignored"}, None, b"fLaC" + b"\x00" * 16)
+        (tmp_path / "song.ncm").write_bytes(container)
+        outdir = tmp_path / "out"
+
+        runner = CliRunner()
+        result = runner.invoke(app, ["batch", str(tmp_path), "-o", str(outdir)])
+        assert result.exit_code == 0
+        assert not (outdir / "ignored.flac").exists()
+
+
+class TestEmbedTags:
+    def test_embed_metadata_flac(self, tmp_path):
+        pytest.importorskip("sunoauxtool.download.transcoder")
+        from sunoauxtool.download.ncm.meta import embed_metadata
+
+        # 嵌入需真实可读音频：ffmpeg 合成 1s 正弦真 FLAC 作为载荷
+        import subprocess as _sp
+
+        real = tmp_path / "_real.flac"
+        _sp.run(
+            [str(Path(find_ffmpeg())), "-hide_banner", "-y", "-f", "lavfi", "-i",
+             "sine=frequency=440:duration=1", str(real)],
+            check=True, capture_output=True,
+        )
+        real_payload = real.read_bytes()
+        container = _pack_ncm(
+            b"k" * 16,
+            {"musicName": "标签曲", "artist": [["甲", []], ["乙", []]], "album": "专辑X"},
+            None, real_payload,
+        )
+        content = parse(container)
+        paths = unpack_bytes(container, tmp_path, write_cover=False)
+        audio = paths[0]
+        assert audio.read_bytes() == real_payload
+        out = embed_metadata(audio, content)
+        assert out == audio
+        # ffprobe 验证标签写入
+        probe = Path(str(find_ffmpeg())).with_name("ffprobe.exe")
+        if not probe.is_file():
+            probe = Path(str(find_ffmpeg()).replace("ffmpeg", "ffprobe"))
+        res = subprocess.run(
+            [str(probe), "-v", "error", "-show_entries", "format_tags", "-of", "json", str(audio)],
+            capture_output=True, text=True,
+        )
+        tags = json.loads(res.stdout or "{}").get("format", {}).get("tags", {})
+        assert tags.get("title") == "标签曲"
+        assert tags.get("album") == "专辑X"
+        assert "甲" in tags.get("artist", "") and "乙" in tags.get("artist", "")

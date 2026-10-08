@@ -20,6 +20,7 @@
 
 from __future__ import annotations
 
+import subprocess
 import sys
 from pathlib import Path
 from typing import List, Optional
@@ -769,7 +770,6 @@ def doctor_cmd(
     # ffmpeg / ffprobe（1.4.7 F1：video / dsp concat / preview 全依赖；
     # 复用 download 包三层定位：SUNO_FFMPEG / SUNO_FFMPEG_DIRS / PATH / 已知目录）
     import importlib.util
-    import subprocess
 
     try:
         from sunoauxtool.download.transcoder import _find_ffprobe, find_ffmpeg
@@ -803,6 +803,25 @@ def doctor_cmd(
             _doctor_item("ffprobe", f"✅ {ffprobe}")
         except Exception:
             _doctor_item("ffprobe", "⚠️ 未找到（视频 e2e 校验/取证需要）")
+            warnings += 1
+        # 转码中枢（1.6.2）所需编码器探测：缺哪个就提示对应格式不可转
+        try:
+            enc_probe = subprocess.run(
+                [ffmpeg, "-hide_banner", "-encoders"], capture_output=True, text=True, timeout=30
+            )
+            encoders = enc_probe.stdout or ""
+            for enc_name, label in (
+                ("libmp3lame", "mp3"),
+                ("aac", "m4a/aac"),
+                ("flac", "flac"),
+            ):
+                if enc_name in encoders:
+                    _doctor_item(f"转码编码器 {label}", "✅")
+                else:
+                    _doctor_item(f"转码编码器 {label}", f"⚠️ 缺少 {enc_name}（相关格式转码不可用）")
+                    warnings += 1
+        except Exception:
+            _doctor_item("转码编码器", "⚠️ 探测失败")
             warnings += 1
 
     # AI 依赖

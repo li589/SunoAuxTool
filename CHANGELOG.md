@@ -2,6 +2,20 @@
 
 本项目遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.0.0/) 风格。
 
+## [1.6.2] - 2026-10-09（转码中枢整合：批量混合扫描 + 标签嵌入 + doctor 探测）
+
+### 新增
+- **`downloadhelper batch --include-ncm`**：批量扫描同时处理 fMP4 解码与
+  .ncm 解包，报告分类汇总（解码/NCM/跳过/失败）。
+- **`downloadhelper ncm --embed-tags`**：解包后把标题/艺术家/专辑与封面
+  经 ffmpeg 嵌入音频（mp3→ID3v2+APIC，flac→Vorbis+picture），流复制
+  不重编码；`-f` 封装器按扩展名推断（`.tagged.flac` 保留原后缀防
+  muxer 推断失败）。
+- **doctor 转码编码器探测**：逐一检查 libmp3lame / aac / flac，缺失时
+  给出警告并计数（不阻塞）。
+- 测试 +3：batch 混合扫描（有/无 --include-ncm）、标签嵌入经 ffprobe
+  验证（真实 FLAC 载荷）。
+
 ## [1.6.1] - 2026-10-09（NCM 解包组件：网易云容器还原原始音频）
 
 ### 新增

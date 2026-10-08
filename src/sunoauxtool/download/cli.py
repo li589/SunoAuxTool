@@ -88,15 +88,27 @@ def batch(
     fmt: str = typer.Option("both", "--fmt", help="输出格式: opus | mp3 | both"),
     bitrate: str = typer.Option("192k", "--bitrate", help="MP3 码率"),
     ffmpeg: Optional[str] = typer.Option(None, "--ffmpeg-path", help="ffmpeg 绝对路径"),
+    include_ncm: bool = typer.Option(False, "--include-ncm", help="同时解包目录中的 .ncm 文件（1.6.2）"),
 ) -> None:
     """批量扫描目录：解码所有 fMP4，加密密文跳过并汇总报告。"""
     target_out = out or directory
     decoded: list[Path] = []
     skipped: list[str] = []
     errors: list[str] = []
+    ncm_ok: list[Path] = []
 
     for file in sorted(directory.iterdir()):
         if not file.is_file():
+            continue
+        if include_ncm and file.suffix.lower() == ".ncm":
+            try:
+                from sunoauxtool.download.ncm import unpack_file
+
+                ncm_ok.extend(unpack_file(file, target_out, overwrite=False))
+            except SunoError as exc:
+                errors.append(f"{file.name}: {exc.message}")
+            except FileExistsError as exc:
+                errors.append(f"{file.name}: {exc}")
             continue
         verdict = identify(str(file))
         if verdict.is_encrypted:
@@ -112,6 +124,10 @@ def batch(
     typer.echo(f"解码成功 {len(decoded)} 个文件:")
     for path in decoded:
         typer.echo(f"  + {path}")
+    if ncm_ok:
+        typer.echo(f"NCM 解包成功 {len(ncm_ok)} 个文件:")
+        for path in ncm_ok:
+            typer.echo(f"  + {path}")
     if skipped:
         typer.echo(f"\n跳过 {len(skipped)} 个加密密文（无密钥不可解，建议改用缓存捕获产物）:")
         for item in skipped:
@@ -187,16 +203,25 @@ def ncm(
     out: Path = typer.Option(Path("."), "-o", "--out", help="输出目录，默认当前目录"),
     stem: Optional[str] = typer.Option(None, "--stem", help="输出文件名主干（默认按元数据命名）"),
     cover: bool = typer.Option(True, "--cover/--no-cover", help="是否同时导出封面图"),
+    embed_tags: bool = typer.Option(False, "--embed-tags", help="把标题/艺术家/专辑/封面嵌入音频（ffmpeg）"),
     overwrite: bool = typer.Option(False, "--overwrite", help="覆盖已存在的输出文件"),
 ) -> None:
     """解包 NCM 为原始音频（1.6.1）：flac/mp3 原样还原，不做转码。"""
-    from sunoauxtool.download.ncm import unpack_file
+    from sunoauxtool.download.ncm import parse, unpack_bytes, unpack_file
 
     if out.exists() and not out.is_dir():
         typer.echo(f"错误: 输出路径不是目录: {out}", err=True)
         raise typer.Exit(code=24)
     try:
-        paths = unpack_file(file, out, stem=stem, write_cover=cover, overwrite=overwrite)
+        if embed_tags:
+            data = file.read_bytes()
+            content = parse(data)
+            paths = unpack_bytes(data, out, stem=stem, write_cover=cover, overwrite=overwrite)
+            from sunoauxtool.download.ncm.meta import embed_metadata
+
+            paths = [embed_metadata(paths[0], content, overwrite=True)] + paths[1:]
+        else:
+            paths = unpack_file(file, out, stem=stem, write_cover=cover, overwrite=overwrite)
     except FileExistsError as exc:
         typer.echo(f"错误: {exc}（加 --overwrite 覆盖）", err=True)
         raise typer.Exit(code=23) from None
