@@ -207,3 +207,17 @@ def test_export_files_with_meta(db, sample_metadata, tmp_path):
     names = [Path(f).name for f in files]
     assert "metadata.json" in names
     assert "preview.html" in names
+
+def test_add_without_init_lazy_schema(tmp_path, sample_wav):
+    """全流程验证回归（1.5.6）：全新库未显式 init 时 add/list 不再报 no such table。"""
+    inst = InspirationDB(str(tmp_path / "fresh.db"))
+    insp_id = inst.add(str(sample_wav), tags="x", rating=3)
+    assert insp_id >= 1
+    items = inst.list()
+    assert len(items) == 1 and items[0]["tags"] == "x"
+
+
+def test_list_without_init_lazy_schema(tmp_path):
+    """全新库直接 list 返回空而不抛错。"""
+    inst = InspirationDB(str(tmp_path / "fresh2.db"))
+    assert inst.list() == []

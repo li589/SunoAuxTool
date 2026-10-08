@@ -275,3 +275,32 @@ def test_check_vram_with_cuda(mock_musicgen_env):
 def test_invalid_model_size():
     with pytest.raises(AiDependencyError):
         MusicGenAdapter(model_size="huge")
+
+
+def test_generate_deep_dependency_missing_exit_6(mock_musicgen_env, tmp_path, monkeypatch):
+    """全流程验证回归（1.5.6）：audiocraft 顶层可导入但深层依赖（triton）缺失时，
+    generate 须收口为 AiDependencyError(6)，不得漏成意外错误。"""
+    import builtins
+    import sys as _sys
+
+    from sunoauxtool.ai import musicgen as mg_mod
+
+    adapter = mg_mod.MusicGenAdapter()
+    real_import = builtins.__import__
+
+    def fake_import(name, *args, **kwargs):
+        if name == "audiocraft.models" or name.startswith("audiocraft.models."):
+            raise ModuleNotFoundError("No module named 'triton'")
+        return real_import(name, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, "__import__", fake_import)
+    _sys.modules.pop("audiocraft.models", None)
+    wav = tmp_path / "m.wav"
+    import numpy as np
+    import soundfile as sf
+
+    sf.write(str(wav), np.zeros(4410, dtype=np.float32), 44100)
+    with pytest.raises(AiDependencyError) as ei:
+        adapter.generate(str(wav), prompt="pop", seed=1, output=str(tmp_path / "o.wav"))
+    assert ei.value.code == 6
+    assert "triton" in str(ei.value)

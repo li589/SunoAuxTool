@@ -2,6 +2,25 @@
 
 本项目遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.0.0/) 风格。
 
+## [1.5.6] - 2026-10-09（全流程验证 bugfix：inspire 懒建表 + musicgen 深依赖收口）
+
+### 修复
+- **`inspire add/list` 全新数据库报 `no such table: inspirations`**（全流程
+  验证发现）：只有显式 `inspire init` 会建表，直接 add/list 即炸。DDL 提为
+  模块常量并移入 `_conn()` 懒初始化，任何操作幂等建表；`init_db()` 行为不变。
+  +2 例回归测试。
+- **`ai musicgen` 深层依赖缺失漏成意外错误（退出码 9）**：audiocraft 顶层
+  可导入（`is_available()` 通过）但其内部 `import triton` 失败时，
+  `from audiocraft.models import MusicGen` 抛 ModuleNotFoundError 未被收口。
+  现捕获并转 AiDependencyError(6)，附 Windows 修复提示
+  （`pip install 'triton-windows<3.2'`，3.8 与 audiocraft JIT API 不兼容）。
+  +1 例回归测试。
+
+### 验证
+- 全流程实跑 20+ 模块（本机，含真实 AI 链）：MusicGen（triton 修复后 GPU
+  真生成 15s）、DiffRhythm（module 源码模式 95s）、AudioSR（48kHz 超分）、
+  basic-pitch（ONNX 复调转谱）均真跑通过。
+
 ## [1.5.5] - 2026-10-09（真实引擎音频回归语料）
 
 ### 新增

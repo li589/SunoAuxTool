@@ -161,7 +161,18 @@ class MusicGenAdapter(AIGenerator):
         import numpy as np
         import soundfile as sf
         import torch
-        from audiocraft.models import MusicGen
+        try:
+            from audiocraft.models import MusicGen
+        except ModuleNotFoundError as exc:
+            # audiocraft 顶层可导入但其深层依赖缺失（实测：Windows 缺 triton 时
+            # audiocraft.models 触发 ModuleNotFoundError）——收口为退出码 6，
+            # 全流程验证发现（1.5.6）。
+            raise AiDependencyError(
+                f"audiocraft 深层依赖缺失: {exc.name}\n"
+                f"{_INSTALL_GUIDE}\n"
+                "Windows 提示: pip install 'triton-windows<3.2'（需与 torch 版本匹配）",
+                code=6,
+            ) from exc
 
         # 输入与显存前置校验（显存不足给出友好提示，不 OOM 崩溃）
         mono, melody_sr = self._read_melody(source_wav)

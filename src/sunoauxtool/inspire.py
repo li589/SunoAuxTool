@@ -14,6 +14,27 @@ from typing import Any, Optional
 
 DB_FILENAME = "sunoauxtool.db"
 
+_DDL = """
+CREATE TABLE IF NOT EXISTS inspirations (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    path TEXT NOT NULL,
+    kind TEXT DEFAULT 'suno',
+    style TEXT,
+    bpm INTEGER,
+    seed INTEGER,
+    chords TEXT,
+    duration_s REAL,
+    sample_rate INTEGER,
+    rms_db REAL,
+    peak_db REAL,
+    spectral_centroid REAL,
+    tags TEXT,
+    rating INTEGER,
+    created_at TEXT,
+    params_json TEXT
+)
+"""
+
 
 def _default_db_path() -> str:
     """默认数据库路径：项目根 sunoauxtool.db。"""
@@ -29,31 +50,15 @@ class InspirationDB:
     def _conn(self) -> sqlite3.Connection:
         conn = sqlite3.connect(self.db_path)
         conn.row_factory = sqlite3.Row
+        # 懒初始化：任何操作（add/list/get/delete/export）都幂等建表，
+        # 全新数据库不再依赖显式 inspire init（全流程验证发现的回归，1.5.6）。
+        conn.execute(_DDL)
         return conn
 
     def init_db(self) -> str:
         """初始化数据库（建表）。"""
         with self._conn() as conn:
-            conn.execute("""
-                CREATE TABLE IF NOT EXISTS inspirations (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    path TEXT NOT NULL,
-                    kind TEXT DEFAULT 'suno',
-                    style TEXT,
-                    bpm INTEGER,
-                    seed INTEGER,
-                    chords TEXT,
-                    duration_s REAL,
-                    sample_rate INTEGER,
-                    rms_db REAL,
-                    peak_db REAL,
-                    spectral_centroid REAL,
-                    tags TEXT,
-                    rating INTEGER,
-                    created_at TEXT,
-                    params_json TEXT
-                )
-            """)
+            conn.execute(_DDL)
         return self.db_path
 
     def add(
