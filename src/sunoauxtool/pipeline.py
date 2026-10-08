@@ -11,8 +11,6 @@ P2-5：产物经 OutputManager 规划（<root>/<project>/<YYYYMMDD>/{style}_{bpm
 
 from __future__ import annotations
 
-import os
-import tempfile
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
@@ -131,171 +129,156 @@ class Pipeline:
         )
 
         output_manager = OutputManager(self.config, project=self.project, output_dir=self.output_dir)
-        output_root = output_manager.base_dir()
+        output_manager.base_dir()  # 确保输出根目录存在（1.4.7 L3：tmp 中转目录已移除）
 
-        # 中间产物目录：非 dry-run 才创建（dry-run 不写任何产物）
-        tmp_root = output_root / ".tmp"
-        tmp_dir: Optional[Path] = None
+        # 1. 环境探测（真实引擎；仅默认 module 环境缺失抛 ModuleError(7)，其余日志提示）
+        if not self.dry_run:
+            PathResolver(self.config).ensure_ready()
 
-        try:
-            # 1. 环境探测（真实引擎；仅默认 module 环境缺失抛 ModuleError(7)，其余日志提示）
-            if not self.dry_run:
-                PathResolver(self.config).ensure_ready()
+        # 2. 生成 NoteSequence
+        generator = ProceduralGenerator(seed=request.seed)
+        seq = generator.generate(request)
 
-            # 2. 生成 NoteSequence
-            generator = ProceduralGenerator(seed=request.seed)
-            seq = generator.generate(request)
+        # 输出规划（防覆盖序号；产物路径稳定，metadata 可追溯）
+        seq_no = output_manager.next_seq(request.style, request.bpm, request.seed, "mid")
+        export_ext = opts.format
+        midi_plan = output_manager.plan_path(
+            style=request.style, bpm=request.bpm, seed=request.seed, ext="mid", seq=seq_no,
+            mkdir=False,
+        )
+        wav_plan = output_manager.plan_path(
+            style=request.style, bpm=request.bpm, seed=request.seed, ext="wav", seq=seq_no,
+            mkdir=False,
+        )
+        export_plan = output_manager.plan_path(
+            style=request.style, bpm=request.bpm, seed=request.seed,
+            ext=export_ext, seq=seq_no, suffix=f"_suno{opts.duration}s", mkdir=False,
+        )
 
-            # 输出规划（防覆盖序号；产物路径稳定，metadata 可追溯）
-            seq_no = output_manager.next_seq(request.style, request.bpm, request.seed, "mid")
-            export_ext = opts.format
-            midi_plan = output_manager.plan_path(
-                style=request.style, bpm=request.bpm, seed=request.seed, ext="mid", seq=seq_no,
-                mkdir=False,
+        if self.dry_run:
+            logger.info(
+                "[DRY-RUN] fluidsynth 将执行: fluidsynth -ni -F %s -R %d -O s16 -g 0.60 "
+                "<soundfont: %s> <midi: %s>",
+                wav_plan, self.config.export.sample_rate, self.config.paths.soundfont, midi_plan,
             )
-            wav_plan = output_manager.plan_path(
-                style=request.style, bpm=request.bpm, seed=request.seed, ext="wav", seq=seq_no,
-                mkdir=False,
-            )
-            export_plan = output_manager.plan_path(
-                style=request.style, bpm=request.bpm, seed=request.seed,
-                ext=export_ext, seq=seq_no, suffix=f"_suno{opts.duration}s", mkdir=False,
-            )
-
-            if self.dry_run:
-                logger.info(
-                    "[DRY-RUN] fluidsynth 将执行: fluidsynth -ni -F %s -R %d -O s16 -g 0.60 "
-                    "<soundfont: %s> <midi: %s>",
-                    wav_plan, self.config.export.sample_rate, self.config.paths.soundfont, midi_plan,
-                )
-                logger.info("[DRY-RUN] export suno: %s -> %s", wav_plan, export_plan)
-                logger.info("[DRY-RUN] 不写任何产物文件")
-                return PipelineResult(
-                    midi_path=str(midi_plan), wav_path=str(wav_plan),
-                    export_path=str(export_plan),
-                    duration_s=float(opts.duration), sample_rate=opts.sample_rate,
-                    bit_depth=opts.bit_depth, chords=request.chords, seed=request.seed,
-                    bpm=request.bpm, bars=request.bars, key=request.key,
-                    style=request.style, format=opts.format,
-                )
-
-            # 3. 落盘 .mid（稳定路径）
-            tmp_root.mkdir(parents=True, exist_ok=True)
-            tmp_dir = Path(tempfile.mkdtemp(prefix="sng_tmp_", dir=str(tmp_root)))
-            midi_path = Path(MidiDocument.from_sequence(seq).write(midi_plan))
-
-            # 3b. 谱面产物（#12，--score）：与 MIDI 同目录同主干；失败只告警不阻断音频
-            score_artifacts: list[ArtifactMeta] = []
-            score_svg = ""
-            score_written: Dict[str, str] = {}
-            if self.score_options is not None:
-                score_artifacts, score_svg, score_written = self._export_score(
-                    seq, midi_path, seq_no, request.seed
-                )
-
-            # 4. 渲染 WAV（真实引擎；renderer 内部解析 module 路径 + 双音色库回退）
-            renderer = FluidSynthRenderer(
-                fluidsynth_path=self.config.paths.fluidsynth,
-                soundfont_backup=self.config.paths.soundfont_backup,
-            )
-            wav_path = Path(
-                renderer.render(str(midi_path), self.config.paths.soundfont, str(wav_plan))
+            logger.info("[DRY-RUN] export suno: %s -> %s", wav_plan, export_plan)
+            logger.info("[DRY-RUN] 不写任何产物文件")
+            return PipelineResult(
+                midi_path=str(midi_plan), wav_path=str(wav_plan),
+                export_path=str(export_plan),
+                duration_s=float(opts.duration), sample_rate=opts.sample_rate,
+                bit_depth=opts.bit_depth, chords=request.chords, seed=request.seed,
+                bpm=request.bpm, bars=request.bars, key=request.key,
+                style=request.style, format=opts.format,
             )
 
-            # 5. DSP 阶段（P2-1）：render 输出后、export 前（就地处理稳定 wav）
-            self._apply_dsp(wav_path)
+        # 3. 落盘 .mid（稳定路径；1.4.7 L3：不再创建未使用的 tmp 中转目录）
+        midi_path = Path(MidiDocument.from_sequence(seq).write(midi_plan))
 
-            # 6. Suno 合规导出（P2-5 命名：{style}_{bpm}_{seed}_{seq}_suno{ds}s）
-            exporter = SunoExporter()
-            final_path = exporter.export(str(wav_path), opts, output_path=export_plan)
-
-            # 7. 元数据（引用稳定产物路径）
-            meta = SunoExporter.describe(final_path)
-            result = PipelineResult(
-                midi_path=str(midi_path),
-                wav_path=str(wav_path),
-                export_path=final_path,
-                duration_s=meta["duration_s"],
-                sample_rate=meta["sample_rate"],
-                bit_depth=meta["bit_depth"],
-                chords=request.chords,
-                seed=request.seed,
-                bpm=request.bpm,
-                bars=request.bars,
-                key=request.key,
-                style=request.style,
-                format=opts.format,
-                score_paths=dict(score_written),
+        # 3b. 谱面产物（#12，--score）：与 MIDI 同目录同主干；失败只告警不阻断音频
+        score_artifacts: list[ArtifactMeta] = []
+        score_svg = ""
+        score_written: Dict[str, str] = {}
+        if self.score_options is not None:
+            score_artifacts, score_svg, score_written = self._export_score(
+                seq, midi_path, seq_no, request.seed
             )
-            if self.config.output.metadata:
-                output_manager.write_metadata(
-                    RunMeta(
-                        command=f"sunoauxtool pipeline --style {request.style} --seed {request.seed}",
-                        seed=request.seed,
-                        started_at=datetime.now().isoformat(timespec="seconds"),
-                        duration_s=round(meta["duration_s"], 2),
-                        version=__version__,
-                        config_path=str(self.config.config_path) if self.config.config_path else None,
+
+        # 4. 渲染 WAV（真实引擎；renderer 内部解析 module 路径 + 双音色库回退）
+        renderer = FluidSynthRenderer(
+            fluidsynth_path=self.config.paths.fluidsynth,
+            soundfont_backup=self.config.paths.soundfont_backup,
+        )
+        wav_path = Path(
+            renderer.render(str(midi_path), self.config.paths.soundfont, str(wav_plan))
+        )
+
+        # 5. DSP 阶段（P2-1）：render 输出后、export 前（就地处理稳定 wav）
+        self._apply_dsp(wav_path)
+
+        # 6. Suno 合规导出（P2-5 命名：{style}_{bpm}_{seed}_{seq}_suno{ds}s）
+        exporter = SunoExporter()
+        final_path = exporter.export(str(wav_path), opts, output_path=export_plan)
+
+        # 7. 元数据（引用稳定产物路径）
+        meta = SunoExporter.describe(final_path)
+        result = PipelineResult(
+            midi_path=str(midi_path),
+            wav_path=str(wav_path),
+            export_path=final_path,
+            duration_s=meta["duration_s"],
+            sample_rate=meta["sample_rate"],
+            bit_depth=meta["bit_depth"],
+            chords=request.chords,
+            seed=request.seed,
+            bpm=request.bpm,
+            bars=request.bars,
+            key=request.key,
+            style=request.style,
+            format=opts.format,
+            score_paths=dict(score_written),
+        )
+        if self.config.output.metadata:
+            output_manager.write_metadata(
+                RunMeta(
+                    command=f"sunoauxtool pipeline --style {request.style} --seed {request.seed}",
+                    seed=request.seed,
+                    started_at=datetime.now().isoformat(timespec="seconds"),
+                    duration_s=round(meta["duration_s"], 2),
+                    version=__version__,
+                    config_path=str(self.config.config_path) if self.config.config_path else None,
+                ),
+                [
+                    ArtifactMeta(
+                        path=str(midi_path), kind="midi",
+                        params={"chords": request.chords, "bpm": request.bpm,
+                                "bars": request.bars, "style": request.style},
+                        seed=request.seed, seq=seq_no,
+                        duration_s=seq.duration_seconds(),
                     ),
-                    [
-                        ArtifactMeta(
-                            path=str(midi_path), kind="midi",
-                            params={"chords": request.chords, "bpm": request.bpm,
-                                    "bars": request.bars, "style": request.style},
-                            seed=request.seed, seq=seq_no,
-                            duration_s=seq.duration_seconds(),
-                        ),
-                        ArtifactMeta(
-                            path=str(wav_path), kind="wav",
-                            params={"bpm": request.bpm, "style": request.style},
-                            seed=request.seed, seq=seq_no,
-                            duration_s=round(meta["duration_s"], 2),
-                            sample_rate=meta["sample_rate"],
-                        ),
-                        ArtifactMeta(
-                            path=final_path, kind="suno",
-                            params={"duration": opts.duration, "format": opts.format,
-                                    "sample_rate": opts.sample_rate, "bit_depth": opts.bit_depth},
-                            seed=request.seed, seq=seq_no,
-                            duration_s=meta["duration_s"],
-                            sample_rate=meta["sample_rate"],
-                        ),
-                        *score_artifacts,
-                    ],
+                    ArtifactMeta(
+                        path=str(wav_path), kind="wav",
+                        params={"bpm": request.bpm, "style": request.style},
+                        seed=request.seed, seq=seq_no,
+                        duration_s=round(meta["duration_s"], 2),
+                        sample_rate=meta["sample_rate"],
+                    ),
+                    ArtifactMeta(
+                        path=final_path, kind="suno",
+                        params={"duration": opts.duration, "format": opts.format,
+                                "sample_rate": opts.sample_rate, "bit_depth": opts.bit_depth},
+                        seed=request.seed, seq=seq_no,
+                        duration_s=meta["duration_s"],
+                        sample_rate=meta["sample_rate"],
+                    ),
+                    *score_artifacts,
+                ],
+            )
+
+        # 8. 自动生成 HTML 预览页（P3-A1）
+        if self._preview_enabled():
+            try:
+                preview = PreviewGenerator()
+                preview_path = preview.generate_for(
+                    final_path,
+                    {
+                        "时长": f"{meta['duration_s']}s",
+                        "采样率": f"{meta['sample_rate']}Hz",
+                        "位深": f"{meta['bit_depth']}bit",
+                        "风格": request.style,
+                        "BPM": request.bpm,
+                        "seed": request.seed,
+                        "和弦": request.chords,
+                    },
+                    output_manager.root(),
+                    label=Path(final_path).name,
+                    score_svg=score_svg,
                 )
+                logger.info("预览页: %s", preview_path)
+            except Exception as exc:  # 预览失败不阻断管线
+                logger.warning("预览页生成失败（不影响产物）: %s", exc)
 
-            # 8. 自动生成 HTML 预览页（P3-A1）
-            if self._preview_enabled():
-                try:
-                    preview = PreviewGenerator()
-                    preview_path = preview.generate_for(
-                        final_path,
-                        {
-                            "时长": f"{meta['duration_s']}s",
-                            "采样率": f"{meta['sample_rate']}Hz",
-                            "位深": f"{meta['bit_depth']}bit",
-                            "风格": request.style,
-                            "BPM": request.bpm,
-                            "seed": request.seed,
-                            "和弦": request.chords,
-                        },
-                        output_manager.root(),
-                        label=Path(final_path).name,
-                        score_svg=score_svg,
-                    )
-                    logger.info("预览页: %s", preview_path)
-                except Exception as exc:  # 预览失败不阻断管线
-                    logger.warning("预览页生成失败（不影响产物）: %s", exc)
-
-            return result
-        finally:
-            if tmp_dir is not None:
-                _force_remove_tree(tmp_dir)
-                # 若 .tmp 根目录已空则一并清理
-                try:
-                    tmp_root.rmdir()
-                except OSError:
-                    pass
+        return result
 
     # -- 谱面（#12）--------------------------------------------------------
 
@@ -370,28 +353,3 @@ class Pipeline:
             return True
         return bool(getattr(preview, "enabled", True))
 
-
-def _force_remove_tree(path: Path) -> None:
-    """删除目录树。
-
-    不使用 shutil.rmtree：在 WorkBuddy 沙箱环境下其被拦截（回收站不可用），
-    改用 os.remove/os.rmdir 逐项删除，保证中间产物真正被清理。
-    """
-    target = Path(path)
-    if not target.exists():
-        return
-    for root, dirs, files in os.walk(str(target), topdown=False):
-        for name in files:
-            try:
-                os.remove(os.path.join(root, name))
-            except OSError:
-                pass
-        for name in dirs:
-            try:
-                os.rmdir(os.path.join(root, name))
-            except OSError:
-                pass
-    try:
-        os.rmdir(str(target))
-    except OSError:
-        pass

@@ -11,7 +11,7 @@ from sunoauxtool.cli import app
 from sunoauxtool.config import Config
 from sunoauxtool.export.audio import write_wav
 from sunoauxtool.export.suno import ExportOptions
-from sunoauxtool.pipeline import Pipeline, PipelineResult, _force_remove_tree
+from sunoauxtool.pipeline import Pipeline, PipelineResult
 
 runner = CliRunner()
 
@@ -83,56 +83,6 @@ def test_field_dict_works_for_other_dataclasses():
     assert set(d) == {f.name for f in ExportOptions.__dataclass_fields__.values()}
 
 
-# -- _force_remove_tree 容错分支 -------------------------------------------
-
-
-def test_force_remove_tree(tmp_path):
-    """_force_remove_tree 删除目录树。"""
-    d = tmp_path / "subdir"
-    d.mkdir()
-    (d / "a.txt").write_text("hello")
-    (d / "b.txt").write_text("world")
-    sub = d / "nested"
-    sub.mkdir()
-    (sub / "c.txt").write_text("deep")
-
-    assert d.is_dir()
-    _force_remove_tree(d)
-    assert not d.exists()
-
-
-def test_force_remove_tree_nonexistent():
-    """不存在的路径不崩溃。"""
-    _force_remove_tree(Path("/nonexistent/path"))
-
-
-def test_force_remove_tree_empty_dir(tmp_path):
-    """空目录可删除（不崩溃）。"""
-    d = tmp_path / "empty"
-    d.mkdir()
-    _force_remove_tree(d)
-    # 沙箱环境可能拦截删除，只要不崩溃即可
-    assert True
-
-
-def test_force_remove_tree_swallows_os_errors(tmp_path, monkeypatch):
-    """文件/子目录/目标本身删除失败时逐级吞掉 OSError，绝不外抛。"""
-
-    def _locked(*_a, **_k):
-        raise OSError("file locked (simulated)")
-
-    d = tmp_path / "locked"
-    sub = d / "nested"
-    sub.mkdir(parents=True)
-    (d / "a.txt").write_text("x")
-    (sub / "c.txt").write_text("y")
-
-    monkeypatch.setattr("sunoauxtool.pipeline.os.remove", _locked)
-    # os.remove 全部失败 → 目录非空 → 内层 rmdir（392-393）与目标 rmdir（396-397）也失败
-    _force_remove_tree(d)  # 不抛即通过
-    assert d.is_dir()  # 内容确实未被删除
-
-
 # -- run() 集成（mock 渲染） ------------------------------------------------
 
 
@@ -191,7 +141,7 @@ def test_pipeline_preview_failure_warns_not_blocks(tmp_project, monkeypatch):
 
 
 def test_pipeline_tmp_root_leftover_tolerated(tmp_project, monkeypatch):
-    """.tmp 根目录残留他物时 rmdir 失败被吞掉（297-298），且不碰用户残留。"""
+    """1.4.7 L3：管线已不使用 .tmp 中转目录——残留用户文件应原样保留、不碰不删。"""
     from sunoauxtool.render.fluidsynth import FluidSynthRenderer
 
     monkeypatch.setattr(FluidSynthRenderer, "render", _fake_render)
@@ -202,5 +152,6 @@ def test_pipeline_tmp_root_leftover_tolerated(tmp_project, monkeypatch):
 
     result = runner.invoke(app, ["pipeline"])
     assert result.exit_code == 0, result.output
-    # 残留文件原样保留（管线只清自己创建的 mkdtemp 子目录）
+    # 残留文件原样保留（管线不再创建/清理 .tmp）
     assert stray.is_file()
+    assert not list(Path("output").rglob("sng_tmp_*"))
