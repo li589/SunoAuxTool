@@ -232,9 +232,20 @@ class Config:
         return cfg
 
     def write_template(self, path: str | Path) -> str:
-        """生成带注释的默认配置模板。"""
+        """生成带注释的默认配置模板。
+
+        1.4.7 修复（F3 测试发现）：默认 Config 含 None 字段（如 logo.path），
+        asdict 后直接 tomli_w.dumps 会抛 "NoneType is not TOML serializable"；
+        序列化前递归剔除 None（省略 = 用内置默认值，模板语义不变）。
+        """
         default = self._to_dict()
-        template = tomli_w.dumps(default)
+
+        def _strip_nones(obj: Any) -> Any:
+            if isinstance(obj, dict):
+                return {k: _strip_nones(v) for k, v in obj.items() if v is not None}
+            return obj
+
+        template = tomli_w.dumps(_strip_nones(default))
         p = Path(path).expanduser()
         p.parent.mkdir(parents=True, exist_ok=True)
         p.write_text(template, encoding="utf-8")
