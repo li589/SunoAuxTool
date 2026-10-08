@@ -2,7 +2,8 @@
 
 合成点击轨（880Hz 指数衰减短音，间隔 = 拍长）作为真值来源：
 BPM 估计应落在真值 ±3% 内（实测 ≤2.5%，ACF 帧分辨率决定下限），
-置信度对纯节拍信号应显著高，节拍相位误差 <0.06s。
+置信度对纯节拍信号应显著高，节拍相位误差 <0.02s（1.5.1 通量峰位校正 +
+相位抛物线细化；旧口径 0.06s）。
 """
 
 from __future__ import annotations
@@ -13,7 +14,12 @@ import numpy as np
 import pytest
 import soundfile as sf
 
-from sunoauxtool.analysis.tempo import TempoEstimate, beat_grid, estimate_bpm
+from sunoauxtool.analysis.tempo import (
+    TempoEstimate,
+    beat_grid,
+    estimate_bpm,
+    _flux_offset_samples,
+)
 from sunoauxtool.exceptions import InputFileError, ParameterError
 
 SR = 22050
@@ -80,7 +86,7 @@ def test_click_track_confidence_and_phase(tmp_path: Path, bpm: float):
     # 时合法锁在奇数拍，如 0.313 @ 180BPM；第一拍在 t=0 时允许 period 附近等价值）
     per = 60.0 / bpm
     phase_err = min(est.beat_offset % per, per - est.beat_offset % per)
-    assert phase_err < 0.06
+    assert phase_err < 0.02
     assert est.onset_rate == pytest.approx(SR / 512, rel=1e-6)
     assert est.duration == pytest.approx(24 * 60.0 / bpm, rel=1e-3)
 
@@ -189,4 +195,61 @@ def test_beat_offset_known_phase_regression(tmp_path: Path):
 
     est = estimate_bpm(wav)
     assert est.bpm == pytest.approx(bpm, rel=0.03)
-    assert est.beat_offset == pytest.approx(phase, abs=0.08)
+    # 1.5.1 起通量峰位校正 + 相位抛物线细化：实测 max 4.24ms（旧口径 0.08s）
+    assert est.beat_offset == pytest.approx(phase, abs=0.02)
+
+
+# ---------------------------------------------------------------------------
+# 1.5.1：通量峰位校正公式 + 相位精度标定回归
+# ---------------------------------------------------------------------------
+
+
+def test_flux_offset_reference_values():
+    """校正公式参考值：p* = argmax(Hann²[p]−Hann²[p+hop])，corr = 1.25·p*。"""
+    assert _flux_offset_samples(2048, 512) == pytest.approx(1415.0)  # p*=1132
+    assert _flux_offset_samples(1024, 256) == pytest.approx(707.5)   # p*=566
+
+
+def test_flux_offset_frame_le_hop_rejected():
+    """frame <= hop 无法计算窗能量差分峰 → ParameterError(1)。"""
+    with pytest.raises(ParameterError) as exc:
+        _flux_offset_samples(512, 512)
+    assert exc.value.code == 1
+    with pytest.raises(ParameterError):
+        _flux_offset_samples(256, 512)
+
+
+@pytest.mark.parametrize(
+    ("frame", "hop"), [(2048, 512), (1024, 256)], ids=["default", "small"]
+)
+def test_beat_offset_calibration_multi_params(tmp_path: Path, frame: int, hop: int):
+    """多 (frame, hop) 参数组相位标定回归：单点误差 < 10ms（网格实测 max 4.24ms）。
+
+    素材：8s 点击轨（首拍相位错开），44100Hz × 2 BPM × 3 相位。180BPM 的
+    先验折叠属已知边界（见 MEMORY / usage.md），不纳入本回归。
+    """
+    sr = 44100
+    for bpm in (100.0, 150.0):
+        period = 60.0 / bpm
+        for phase in (0.10, 0.25, 0.40):
+            beats = int(8.0 / period)
+            n = int(beats * period * sr)
+            x = np.zeros(n, dtype=np.float32)
+            for k in range(beats):
+                start = int((k * period + phase) * sr)
+                dur = int(0.05 * sr)
+                if start + dur > n:  # 末拍可能越界
+                    break
+                t = np.arange(dur) / sr
+                x[start : start + dur] += (
+                    0.6 * np.sin(2 * np.pi * 880.0 * t) * np.exp(-t * 40.0)
+                ).astype(np.float32)
+            wav = tmp_path / f"cal_{frame}_{hop}_{bpm:.0f}_{phase:.2f}.wav"
+            sf.write(wav, x, sr, subtype="PCM_16")
+
+            est = estimate_bpm(wav, frame=frame, hop=hop)
+            assert est.bpm == pytest.approx(bpm, rel=0.03)
+            assert est.onset_rate == pytest.approx(sr / hop, rel=1e-6)
+            # 与真实相位作差后按周期取模（素材首拍在 phase 处，不是 t=0）
+            phase_err = abs((est.beat_offset - phase + period / 2) % period - period / 2)
+            assert phase_err < 0.01, (frame, hop, bpm, phase, phase_err)

@@ -188,8 +188,12 @@ sunoauxtool tempo <wav> [--min-bpm 40] [--max-bpm 240] [--prior-bpm 120]
 ```
 
 - numpy-only：onset 包络 → ACF → 节奏先验（log-Gaussian，中心 120BPM）消解
-  倍频歧义 → (bpm, phase) 联合梳状搜索。输出 `(bpm, confidence, beat_offset)`。
+  倍频歧义 → (bpm, phase) 联合梳状搜索（相位得分抛物线细化）。输出
+  `(bpm, confidence, beat_offset)`。
 - `--prior-bpm 0` 关闭先验；≥160BPM 素材在默认先验下会被折半，需显式指参。
+- **beat_offset 相位精度（1.5.1）**：合成点击轨 mean 1.25ms / max 4.24ms
+  （通量峰位校正 `1.25·argmax(Hann²[p]−Hann²[p+hop])`）；软起音素材存在
+  ~+60ms 谱通量形态固有偏差（最大谱增位点 ≠ 声学起始点）。
 
 ### 2.11 `transcribe` — WAV → MIDI 转谱（#13）
 

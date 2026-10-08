@@ -39,6 +39,28 @@ TEMPO_PRIOR_BPM = 120.0
 TEMPO_PRIOR_OCTAVES = 0.6
 
 
+def _flux_offset_samples(frame: int, hop: int) -> float:
+    """谱通量峰相对真实起音的系统提前量（样本，正值=包络时间轴需后移补偿）。
+
+    纯窗函数理论：起音落在窗内位置 p 时，该窗与前一窗的窗能量差为
+    ``Hann²[p] − Hann²[p+hop]``，通量峰出现在其最大处 p*。实测（log1p 压缩
+    + 沿频率求和的谱通量）峰位比 p* 晚约 1.25×（四组 (frame,hop) 标定
+    ratio 1.237~1.300，见 docs/reports/plan-1.5.1-beat-phase.md §2.4）。
+
+    标定精度（合成点击轨，默认 2048/512 + 相位抛物线细化）：
+    mean|err| 1.2ms / max 4.6ms（1.5.0 的 frame/2 半窗校正为 11.5/20.9ms）。
+    软起音素材存在 ~+60ms 形态固有偏差（谱增位点≠声学起始点），出范围。
+
+    Raises:
+        ParameterError: frame <= hop（无法计算差分峰，退出码 1）。
+    """
+    if frame <= hop:
+        raise ParameterError(f"frame 须 > hop: {frame} <= {hop}", code=1)
+    w2 = np.hanning(frame) ** 2
+    p_star = int(np.argmax(w2[: frame - hop] - w2[hop:]))
+    return 1.25 * p_star
+
+
 @dataclass(frozen=True)
 class TempoEstimate:
     """测速结果。
@@ -229,16 +251,31 @@ def estimate_bpm(
         """给定 BPM，返回 (相位得分, 最优偏移帧)。"""
         period = 60.0 * rate / bpm_try
         steps = max(8, int(round(period * 4)))  # 相位步长 ~0.25 帧
-        best_score, best_off = -np.inf, 0.0
-        for off in np.linspace(0.0, period, num=steps, endpoint=False):
+        offs = np.linspace(0.0, period, num=steps, endpoint=False)
+        scores = np.full(steps, -np.inf)
+        for i, off in enumerate(offs):
             positions = np.arange(off, n, period, dtype=np.float64)
             positions = positions[positions < n - 1]  # np.interp 右端钳到末值，须裁掉
             if len(positions) == 0:
                 continue
-            score = float(np.interp(positions, idx, env_wide).sum())
-            if score > best_score:
-                best_score, best_off = score, float(off)
-        return best_score, best_off
+            scores[i] = float(np.interp(positions, idx, env_wide).sum())
+        k = int(np.argmax(scores))
+        off = float(offs[k])
+        # 抛物线细化（1.5.1）：对得分峰做三点抛物线求极值偏移，消掉 0.25 帧
+        # 网格粒度。端点无完整左右邻，退回网格值。
+        if 0 < k < steps - 1:
+            a, b, c = float(scores[k - 1]), float(scores[k]), float(scores[k + 1])
+            denom = a - 2.0 * b + c
+            if denom != 0:
+                delta = float(np.clip(0.5 * (a - c) / denom, -0.5, 0.5))
+                off += delta * (period / steps)
+                # 按细化偏移重算得分再参与跨 BPM 比较：网格分只是同一峰的近似，
+                # 细化后的组合位置才是真实得分（实测 max 7.4 -> 4.2ms）。
+                positions = np.arange(off, n, period, dtype=np.float64)
+                positions = positions[positions < n - 1]
+                if len(positions):
+                    return float(np.interp(positions, idx, env_wide).sum()), off
+        return float(scores[k]), off
 
     best_bpm, best_off_frames, best_phase = bpm, 0.0, -np.inf
     for bpm_try in np.linspace(lo_scan, hi_scan, num=61):
@@ -247,11 +284,11 @@ def estimate_bpm(
             best_phase, best_bpm, best_off_frames = score, float(bpm_try), off
     bpm = best_bpm
     best_offset = best_off_frames / rate
-    # 半窗中心校正：onset 通量峰落在「首个包含起音的窗」的起始帧时间上，
-    # 系统性比真实起音提前 0~1 个窗长（均值≈半窗）。按窗中心口径补偿
-    # frame/2 后，合成点击轨实测（22050/44100/48000 三档 sr、多相位）
-    # 相位误差从 -64ms 收敛到 ±18ms 内。
-    best_offset += frame / (2.0 * sr)
+    # 谱通量峰位校正（1.5.1）：_flux_offset_samples 给出通量峰相对真实起音的
+    # 系统提前量（1.25 × Hann² 差分理论峰 p*）。旧实现 frame/(2·sr) 半窗校正
+    # 少补 3/4 hop（实测残差 bias −11.5ms / ±18ms），新公式在合成点击轨
+    # （22050/44100/48000 × 90~180BPM × 5 相位）上 mean 1.2ms / max 4.6ms。
+    best_offset += _flux_offset_samples(frame, hop) / sr
 
     return TempoEstimate(
         bpm=best_bpm,
