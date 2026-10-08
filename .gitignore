@@ -68,3 +68,7 @@ config/sources.toml
 
 # ===== 参考项目（仅本地研读，零代码依赖；README 致谢小节有友情链接）=====
 examples/
+
+# 运行时产物
+sunoauxtool.db
+.codegraph/

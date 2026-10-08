@@ -24,6 +24,17 @@ app = typer.Typer(
     add_completion=False,
 )
 
+# batch --include-unlock 扫描的扩展名（ncm 走 --include-ncm 专旗）
+_UNLOCK_BATCH_EXTS = frozenset(
+    {"kwm", "kgm", "kge", "vpr", "tkm"}
+    | {
+        "mgg", "mgg0", "mggl", "mgg1", "mflac", "mflac0", "mmp4",
+        "qmcflac", "qmcogg", "qmc0", "qmc2", "qmc3", "qmc4", "qmc6", "qmc8",
+        "bkcmp3", "bkcm4a", "bkcflac", "bkcwav", "bkcape", "bkcogg", "bkcwma",
+        "666c6163", "6d7033", "6f6767", "6d3461", "776176",
+    }
+)
+
 
 @app.command()
 def probe(
@@ -89,6 +100,7 @@ def batch(
     bitrate: str = typer.Option("192k", "--bitrate", help="MP3 码率"),
     ffmpeg: Optional[str] = typer.Option(None, "--ffmpeg-path", help="ffmpeg 绝对路径"),
     include_ncm: bool = typer.Option(False, "--include-ncm", help="同时解包目录中的 .ncm 文件（1.6.2）"),
+    include_unlock: bool = typer.Option(False, "--include-unlock", help="同时解密目录中受支持加密格式（kwm/kgm/vpr/qmc，1.6.3）"),
 ) -> None:
     """批量扫描目录：解码所有 fMP4，加密密文跳过并汇总报告。"""
     target_out = out or directory
@@ -96,6 +108,7 @@ def batch(
     skipped: list[str] = []
     errors: list[str] = []
     ncm_ok: list[Path] = []
+    unlock_ok: list[Path] = []
 
     for file in sorted(directory.iterdir()):
         if not file.is_file():
@@ -108,6 +121,16 @@ def batch(
             except SunoError as exc:
                 errors.append(f"{file.name}: {exc.message}")
             except FileExistsError as exc:
+                errors.append(f"{file.name}: {exc}")
+            continue
+        if include_unlock and file.suffix.lower().lstrip(".") in _UNLOCK_BATCH_EXTS:
+            try:
+                from sunoauxtool.download.unlock import unlock_file
+
+                unlock_ok.append(unlock_file(file, target_out))
+            except SunoError as exc:
+                errors.append(f"{file.name}: {exc.message}")
+            except OSError as exc:
                 errors.append(f"{file.name}: {exc}")
             continue
         verdict = identify(str(file))
@@ -127,6 +150,10 @@ def batch(
     if ncm_ok:
         typer.echo(f"NCM 解包成功 {len(ncm_ok)} 个文件:")
         for path in ncm_ok:
+            typer.echo(f"  + {path}")
+    if unlock_ok:
+        typer.echo(f"通用解密成功 {len(unlock_ok)} 个文件:")
+        for path in unlock_ok:
             typer.echo(f"  + {path}")
     if skipped:
         typer.echo(f"\n跳过 {len(skipped)} 个加密密文（无密钥不可解，建议改用缓存捕获产物）:")
@@ -233,6 +260,31 @@ def ncm(
         raise typer.Exit(code=24) from None
     for path in paths:
         typer.echo(f"已解包: {path}")
+
+
+@app.command("unlock")
+def unlock(
+    files: list[Path] = typer.Argument(..., help="输入加密音频文件（ncm/kwm/kgm/vpr/qmc 系列，可多个）"),
+    out: Path = typer.Option(Path("."), "-o", "--out", help="输出目录，默认当前目录"),
+    overwrite: bool = typer.Option(False, "--overwrite", help="覆盖已存在的输出文件"),
+) -> None:
+    """通用解密（1.6.3）：ncm/kwm/kgm/vpr/qmc 系列加密音频 → 原始音频。"""
+    from sunoauxtool.download.unlock import unlock_file
+
+    if out.exists() and not out.is_dir():
+        typer.echo(f"错误: 输出路径不是目录: {out}", err=True)
+        raise typer.Exit(code=24)
+    ok: list[Path] = []
+    for file in files:
+        try:
+            ok.append(unlock_file(file, out, overwrite=overwrite))
+        except SunoError as exc:
+            typer.echo(f"错误[{exc.code}]: {exc.message}", err=True)
+            raise typer.Exit(code=exc.code or 1) from None
+        except OSError as exc:
+            typer.echo(f"错误[24]: {exc}", err=True)
+            raise typer.Exit(code=24) from None
+        typer.echo(f"已解密: {ok[-1]}")
 
 
 @app.command()

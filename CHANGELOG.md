@@ -2,6 +2,37 @@
 
 本项目遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.0.0/) 风格。
 
+## [1.6.3] - 2026-10-09（unlock 通用解密：酷我/酷狗/QQ 音乐多格式）
+
+### 新增
+- **`sunoauxtool.download.unlock`**（零第三方依赖，纯离线）：
+  - **KWM（酷我）**：魔数 `yeelion-kuwo`，头部 24-32 的 u64 种子十进制串
+    与固定字符串异或生成 32 字节循环密钥（算法与常量经官方 web bundle
+    逆向校验）；
+  - **KGM/KGE/VPR（酷狗）**：17 字节文件私钥 + 272 字节修正表 + 外置公钥
+    （~73MB，`SUNO_KGM_KEY` 环境变量或 `~/.cache/sunoauxtool/kugou_key.xz`
+    懒加载，缺失报 29）；VPR 额外 VprMaskDiff 掩码；ghtz08 官方加密/
+    解密测试对实弹验证逐字节一致；
+  - **QMC（QQ 音乐）**：V1 静态密钥（tkm/bkc*/十六进制扩展名）+ V2 内嵌
+    EKey（mflac/mgg*/qmc*/mmp4；PcV1Legacy/QTag footer；STag/MusicEx 无
+    内嵌密钥时报 29 提示在线获取）；tc_tea（腾讯定制 CBC）+ EKey 双层
+    解密 + 按主密钥长度自动选择 Map/RC4 流密码；全部对齐 unlock-music
+    官方 Rust 实现测试向量；
+- **`downloadhelper unlock`**：多文件解密入口（自动按扩展名/魔数分发，
+  含 ncm 透传），输出按嗅探结果命名；
+- **`downloadhelper batch --include-unlock`**：批量扫描同时解密受支持
+  加密格式；`sunoaux post unlock` 聚合镜像；
+- 错误码扩展：27=无法识别的加密格式，28=解密失败，29=缺少外部密钥；
+- 测试 +48：官方向量（V1 transform/0x7FFF 边界/key_compress/QMC2Map/
+  hash/segment_key/RC4/QMC2RC4/tc_tea）、KGM 朴素实现对拍 + 实弹向量、
+  自打包端到端（kwm/qmcflac/qmc3/tkm）、footer 解析、CLI/批量/聚合。
+
+### 说明
+- unlock 组件不对解密结果重嵌标签：QMC/KWM 加密覆盖整文件（含原始
+  ID3/Vorbis 标签），解密即完整还原。
+- 酷狗公钥文件不随包分发（体积与合规考虑），README 附获取方式与
+  上游致谢链接。
+
 ## [1.6.2] - 2026-10-09（转码中枢整合：批量混合扫描 + 标签嵌入 + doctor 探测）
 
 ### 新增

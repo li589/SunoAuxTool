@@ -186,12 +186,19 @@ sunoaux post convert-audio / extract-audio                   # 聚合入口镜�
 
 ### 致谢 / 相关项目
 
-转码与 NCM 解包设计过程中参考了下列优秀项目（**仅设计参考，零代码依赖**，
+转码与 NCM/通用解密设计过程中参考了下列优秀项目（**仅设计参考，零代码依赖**，
 `examples/` 目录本地研读不入库）：
 
 - [ncm2mp3](https://github.com/xzrdmm/ncm2mp3) —— 纯 Python 标准库网易云 NCM 解锁
 - [ncmdump](https://github.com/taurusxin/ncmdump) —— C++ NCM 转储实现
 - [ncm2mp3-js](https://github.com/lisencheng/ncm2mp3-js) —— Web/ekey 路线参考
+- [unlock-music](https://git.unlock-music.dev/um/web) —— 多格式在线/离线音乐解锁
+  （KWM 常量与 QMC 算法语义参考；其 Rust 实现 lib_um_crypto_rust 为 QMC 官方向量来源）
+- [ghtz08/kugou-kgm-decoder](https://github.com/ghtz08/kugou-kgm-decoder) —— KGM 解密
+  算法、272 字节修正表与**酷狗公钥文件 kugou_key.xz** 的获取来源（unlock 组件
+  不分发公钥，请按 docs/unlock.md 自行下载配置）
+- [HowenXu/qmc-decrypt](https://github.com/HowenXu/qmc-decrypt) —— QMC 纯 Python
+  解密参考（交叉验证）
 - SUNO Capture —— Chrome 扩展：suno.com 页面注入 MP3/WAV 下载按钮
 - [DLBunny](https://dlbunny.com/) —— Suno 在线音频下载站
 
