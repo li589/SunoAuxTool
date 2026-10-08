@@ -1092,7 +1092,7 @@ def tempo_cmd(
 
     置信度为归一化自相关峰强（0~1）：≥0.5 高 / ≥0.25 中 / 否则低（节拍感弱）。
     """
-    from sunoauxtool.analysis.tempo import estimate_bpm
+    from sunoauxtool.analysis.tempo import TEMPO_PRIOR_BPM, estimate_bpm
 
     est = estimate_bpm(wav, bpm_min=min_bpm, bpm_max=max_bpm, prior_bpm=prior_bpm)
     label = "高" if est.confidence >= 0.5 else ("中" if est.confidence >= 0.25 else "低")
@@ -1101,6 +1101,21 @@ def tempo_cmd(
         f"   时长 {est.duration:.1f}s / 第一拍 {est.beat_offset:.3f}s / "
         f"onset 帧率 {est.onset_rate:.1f}Hz"
     )
+    # ≥160BPM 边界提示（1.5.4）：默认节奏先验（log-Gaussian 中心 120）会把快节奏
+    # 素材折半到 ~80-150。这里在默认先验下额外跑一次关闭先验的估计，若出现
+    # 「更快且可信的 ≥160 档」则提示用户确认（仅提示，不改变返回值口径）。
+    if (
+        prior_bpm == TEMPO_PRIOR_BPM
+        and max_bpm > 160.0
+        and est.bpm < 160.0
+    ):
+        fast = estimate_bpm(wav, bpm_min=min_bpm, bpm_max=max_bpm, prior_bpm=0)
+        if fast.bpm >= 160.0 and fast.bpm >= est.bpm * 1.8 and fast.confidence >= 0.3:
+            typer.echo(
+                f"⚠️ 提示：关闭节奏先验后检测到更快档 ~{fast.bpm:.1f} BPM"
+                f"（置信度 {fast.confidence:.2f}）。默认先验会把 ≥160BPM 素材折半，"
+                "如确认是快节奏素材请加 --prior-bpm 0 重测。"
+            )
 
 
 @app.command("transcribe", help="WAV → MIDI 转谱（内置单旋律后端；可选 basic-pitch 复调）")

@@ -68,6 +68,26 @@ def test_tempo_reports_bpm_and_confidence(click_wav: Path):
     assert result.exit_code == 0, result.output
     assert "BPM:" in result.output
     assert "置信度" in result.output
+
+
+def test_tempo_fast_tempo_prior_fold_hint(tmp_path: Path):
+    """1.5.4：≥160BPM 素材被默认先验折半时，CLI 打印更快档提示。"""
+    fast_wav = tmp_path / "fast.wav"
+    write_click_wav(fast_wav, 180.0)
+    result = runner.invoke(app, ["tempo", str(fast_wav)])
+    assert result.exit_code == 0, result.output
+    assert "更快档" in result.output
+    assert "--prior-bpm 0" in result.output
+    # 120BPM 常规素材不触发提示
+    normal_wav = tmp_path / "normal.wav"
+    write_click_wav(normal_wav, 120.0)
+    result2 = runner.invoke(app, ["tempo", str(normal_wav)])
+    assert result2.exit_code == 0, result2.output
+    assert "更快档" not in result2.output
+    # 关闭先验后（用户自行指定）不再提示
+    result3 = runner.invoke(app, ["tempo", str(fast_wav), "--prior-bpm", "0"])
+    assert result3.exit_code == 0, result3.output
+    assert "更快档" not in result3.output
     assert "第一拍" in result.output
 
 
