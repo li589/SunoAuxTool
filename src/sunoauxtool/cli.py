@@ -755,10 +755,48 @@ def doctor_cmd(
             typer.echo(f"     → {probe.detail}")
             warnings += 1
 
+    # ffmpeg / ffprobe（1.4.7 F1：video / dsp concat / preview 全依赖；
+    # 复用 download 包三层定位：SUNO_FFMPEG / SUNO_FFMPEG_DIRS / PATH / 已知目录）
+    import importlib.util
+    import subprocess
+
+    try:
+        from sunoauxtool.download.transcoder import _find_ffprobe, find_ffmpeg
+
+        ffmpeg = find_ffmpeg()
+    except Exception:
+        _doctor_item(
+            "ffmpeg",
+            "❌ 未找到（PATH / SUNO_FFMPEG / SUNO_FFMPEG_DIRS 均未命中）",
+        )
+        typer.echo(
+            "     → 修法: 设 SUNO_FFMPEG=<ffmpeg 路径或目录>，或加入 PATH，"
+            "或设 SUNO_FFMPEG_DIRS（video / dsp concat / preview 需要）"
+        )
+        errors += 1
+    else:
+        version = ""
+        try:
+            proc = subprocess.run(
+                [str(ffmpeg), "-version"], capture_output=True, text=True, timeout=10
+            )
+            first = (proc.stdout or "").splitlines()
+            if first:
+                parts = first[0].split()
+                version = parts[2] if len(parts) >= 3 else ""
+        except Exception:
+            version = ""
+        _doctor_item("ffmpeg", f"✅ {ffmpeg}" + (f" ({version})" if version else ""))
+        try:
+            ffprobe = _find_ffprobe(ffmpeg)
+            _doctor_item("ffprobe", f"✅ {ffprobe}")
+        except Exception:
+            _doctor_item("ffprobe", "⚠️ 未找到（视频 e2e 校验/取证需要）")
+            warnings += 1
+
     # AI 依赖
     torch_ok = False
     try:
-        import importlib.util
         torch_ok = importlib.util.find_spec("torch") is not None
     except Exception:
         pass
@@ -799,6 +837,48 @@ def doctor_cmd(
     espeak = shutil.which("espeak-ng")
     _doctor_item("espeak-ng", f"✅ {espeak}" if espeak else "⚠️ 未安装（DiffRhythm 人声合成需要）")
     if not espeak:
+        warnings += 1
+
+    # AudioSR 源码目录（1.4.7 F1：R5 音质提升，可选）
+    try:
+        from sunoauxtool.ai.audiosr import resolve_audiosr_dir
+
+        asr_dir = resolve_audiosr_dir()
+    except Exception:
+        asr_dir = None
+    if asr_dir:
+        _doctor_item("AudioSR", f"✅ 源码目录就位 ({asr_dir})")
+    else:
+        _doctor_item(
+            "AudioSR",
+            "⚠️ 源码目录未就位（enhance 需要：设 AUDIOSR_DIR 或克隆到 src/versatile_audio_super_resolution）",
+        )
+        warnings += 1
+
+    # basic_pitch（1.4.7 F1：复调配调转谱，可选；注意其 __init__ 无 else 分支，
+    # 四后端全缺时 import 即 NameError——这里只做 find_spec 轻量探测）
+    try:
+        bp_ok = importlib.util.find_spec("basic_pitch") is not None
+    except Exception:
+        bp_ok = False
+    if bp_ok:
+        backends = [
+            name
+            for name in ("onnxruntime", "tensorflow", "tflite_runtime", "coremltools")
+            if importlib.util.find_spec(name) is not None
+        ]
+        if backends:
+            _doctor_item("basic_pitch", f"✅ 已安装（推理后端: {backends[0]}）")
+        else:
+            _doctor_item("basic_pitch", "⚠️ 已安装但无可用推理后端")
+            typer.echo("     → 修法: pip install onnxruntime（模型已随包打包，不下载权重）")
+            warnings += 1
+    else:
+        _doctor_item(
+            "basic_pitch",
+            "⚠️ 未安装（transcribe 复调用：pip install basic-pitch --no-deps"
+            " + pip install resampy mir-eval onnxruntime）",
+        )
         warnings += 1
 
     # 项目完整性
