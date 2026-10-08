@@ -2,6 +2,39 @@
 
 本项目遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.0.0/) 风格。
 
+## [1.4.7] - 2026-10-08（审计收尾：F1 doctor / F3 video CLI 测试 / L3 死代码）
+
+> 来源：`docs/reports/plan-1.4.7.md`（审计建议批次表第 2 行）。无破坏性变更。
+
+### 新增
+- **doctor 三项新探测**（`sunoauxtool doctor`，F1）：
+  - ffmpeg / ffprobe：复用 download 包三层定位（SUNO_FFMPEG / SUNO_FFMPEG_DIRS /
+    PATH / 已知目录），命中显示路径与版本；缺失计 error 并给出修法
+    （video / dsp concat / preview 硬依赖）；
+  - AudioSR：`resolve_audiosr_dir` 轻量检查（不触发 import），缺失计 warn
+    并提示 AUDIOSR_DIR / 克隆位置；
+  - basic_pitch：`find_spec` 轻量探测 + 四推理后端检查（规避其 `__init__`
+    无 else 分支的 NameError 陷阱），无后端提示 `pip install onnxruntime`。
+
+### 修复
+- **`video config init` 崩溃**（F3 测试发现）：默认 Config 含 None 字段
+  （logo.path 等），`asdict` 后 `tomli_w.dumps` 抛 "NoneType is not TOML
+  serializable"——序列化前递归剔除 None，模板语义不变（省略 = 内置默认值）。
+
+### 移除
+- **pipeline.py 死代码**（L3）：`tmp_dir` 创建后从未使用（白建白删一个
+  mkdtemp）——tmp 中转目录周期整段移除；失去唯一调用方的
+  `_force_remove_tree` 连同 4 个专属测试一并删除；残留容忍测试改写为
+  「.tmp 用户残留不碰不删」前提。
+
+### 测试
+- `tests/test_video_cli.py` 新增 14 例（F3）：presets/config/version、
+  render 失败路径、multi 未知预设校验 + 聚合入口 `sunoaux post video ...`
+  二次注册转发——`video/cli.py` 覆盖率 29% → **66%**。
+- `tests/test_doctor.py` +5（F1）：ffmpeg 命中/缺失、AudioSR 提示、
+  basic_pitch 无后端、新区块存在性。
+- `tests/test_pipeline.py` 14 → 10（L3 移除 4 例死代码专属测试）。
+
 ## [1.4.6] - 2026-10-07（bugfix：审计 B1-B5 修复）
 
 > 来源：`docs/reports/audit-2026-10-07.md` 全项目审计确认的 5 个中等优先级 bug，

@@ -1,4 +1,8 @@
-# 1.4.7 修复/补强计划（审计收尾批次）
+# 1.4.7 修复/补强计划（审计收尾批次）✅ 已完成（2026-10-08）
+
+> 执行结果：三项主线全部落地并发布（F1 commit `87f4131`、F3 `8027f57`、
+> L3 `5d85ba1`）；F3 过程中额外发现并修复 `video config init` 的
+> NoneType TOML 序列化崩溃（write_template）。video/cli.py 覆盖率 29% → 66%。
 
 > 依据：`docs/reports/audit-2026-10-07.md` 建议批次表第 2 行——「1.4.7 或同批：
 > F1 doctor、F3 video CLI 转发测试、L3 死代码清理」。定位为 1.4.6 bugfix 之后的

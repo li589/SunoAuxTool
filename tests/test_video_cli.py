@@ -7,7 +7,6 @@ video/cli.py 覆盖率仅 29%），以及聚合入口 `sunoaux post video ...` �
 from __future__ import annotations
 
 import re
-from pathlib import Path
 
 import pytest
 from typer.testing import CliRunner
