@@ -2,6 +2,15 @@
 
 本项目遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.0.0/) 风格。
 
+## [1.5.2] - 2026-10-09（L5 性能债：highpass 向量化）
+
+### 修复
+- **`filters.highpass` 逐样本 Python 循环 → `scipy.signal.lfilter` 向量化**
+  （L5，审计遗留最后一条性能项）：传递函数不变
+  （`b=[α,-α], a=[1,-α]`，α = 1/(1+2πfc/fs)，零初始状态逐点等价），
+  长音频从 O(N) Python 循环降为 C 实现（30s 音频实测 ~9ms）。
+- 新增数值等价回归：lfilter vs 循环参考实现逐点一致（mono + stereo 逐声道）。
+
 ## [1.5.1] - 2026-10-09（beat 相位精度：通量峰位校正理论化 + 相位抛物线细化）
 
 > 「centered-STFT 立项」的实验结论落地（plan-1.5.1-beat-phase.md）：±18ms 残差

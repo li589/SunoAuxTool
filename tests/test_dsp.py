@@ -118,6 +118,36 @@ def test_highpass_removes_dc():
     assert abs(float(np.mean(out[-1000:]))) < 1e-3
 
 
+def test_highpass_vectorized_equivalent_to_loop():
+    """1.5.2 L5 回归：lfilter 向量化与逐样本循环逐点一致（mono + stereo）。"""
+    from scipy.signal import lfilter
+
+    def _loop(x: np.ndarray, sr: int, fc: float) -> np.ndarray:
+        alpha = 1.0 / (1.0 + 2.0 * np.pi * fc / sr)
+        out = np.zeros_like(x, dtype=np.float64)
+        prev_y = prev_x = 0.0
+        for i in range(len(x)):
+            yi = alpha * (prev_y + x[i] - prev_x)
+            prev_y, prev_x = yi, x[i]
+            out[i] = yi
+        return out
+
+    rng = np.random.RandomState(11)
+    sr, fc = 44100, 80.0
+    a = 0.5 * np.sin(2 * np.pi * 220 * np.arange(4000) / sr) + 0.05 * rng.randn(4000)
+    got = filters.highpass(a.astype(np.float32), sr, fc)
+    want = lfilter([alpha := 1.0 / (1 + 2 * np.pi * fc / sr), -alpha],
+                   [1.0, -alpha], a)
+    assert np.allclose(got, want, atol=1e-6)
+    # 与循环参考实现逐点一致
+    assert np.allclose(got, _loop(a, sr, fc), atol=1e-6)
+    # stereo：逐声道独立
+    st = np.stack([a, a[::-1]], axis=1).astype(np.float32)
+    got_st = filters.highpass(st, sr, fc)
+    assert np.allclose(got_st[:, 0], got, atol=1e-6)
+    assert np.allclose(got_st[:, 1], filters.highpass(st[:, 1].copy(), sr, fc), atol=1e-6)
+
+
 def test_compressor_reduces_peak():
     """压缩器降低超过阈值的峰值。"""
     audio = np.full(4410, 0.9, dtype=np.float32)  # 峰值 0.9（-0.9dBFS）> 阈值 -12dBFS

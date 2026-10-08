@@ -20,26 +20,17 @@ def highpass(
 
     传递函数：y[n] = alpha * (y[n-1] + x[n] - x[n-1])，alpha = 1 / (1 + 2πfc/fs)。
     对直流分量有完全抑制效果。
+
+    实现（1.5.2 L5 向量化）：等价 scipy.signal.lfilter(b=[α,-α], a=[1,-α])
+    零初始状态——与逐样本循环在数学上逐点一致（有数值等价回归测试），
+    长音频上从 O(N) Python 循环降为 C 实现。
     """
+    from scipy.signal import lfilter
+
     alpha = 1.0 / (1.0 + 2.0 * np.pi * float(cutoff_hz) / float(sample_rate))
-    out = np.zeros_like(audio, dtype=np.float32)
-
-    def _apply_one(x: np.ndarray, o: np.ndarray) -> None:
-        prev_y = 0.0
-        prev_x = 0.0
-        for i in range(len(x)):
-            xi = float(x[i])
-            yi = alpha * (prev_y + xi - prev_x)
-            prev_y = yi
-            prev_x = xi
-            o[i] = yi
-
-    if audio.ndim == 2:
-        for c in range(audio.shape[1]):
-            _apply_one(audio[:, c], out[:, c])
-    else:
-        _apply_one(audio, out)
-    return out
+    x = np.asarray(audio, dtype=np.float64)
+    out = lfilter([alpha, -alpha], [1.0, -alpha], x, axis=0)
+    return out.astype(np.float32)
 
 
 def compressor(
