@@ -2,6 +2,38 @@
 
 本项目遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.0.0/) 风格。
 
+## [1.4.8] - 2026-10-08（F5 basic-pitch 脚手架 + F6 torch.load 补丁链 + F2 覆盖率）
+
+> 审计建议批次表第 3 行的「按方向分批」第一批：工具链补强 + 覆盖率，零行为变更
+> （除两处顺手修复的健壮性 bug，见下）。
+
+### 新增
+- **F5 `scripts/setup_basicpitch.py`**：basic-pitch 一键安装脚手架。
+  `--no-deps` 装主包（绕开 py≥3.11 的 `tensorflow<2.15.1` 死锁标记）+
+  `resampy mir-eval onnxruntime` 三个轻量依赖；幂等（已就绪自动跳过）；
+  `--check` 只探测，退出码 0/6 与 `AiDependencyError` 口径一致。
+- **F6 `setup_vasr.py` → `patch_torch_load()`**：克隆上游后自动给所有
+  `torch.load(...)` 单行调用补 `weights_only=False`（B6 预防：torch≥2.6 起
+  默认翻转，19 处加载点会全部炸掉）。已对真实树实弹执行 19/19 并通过语法
+  编译；幂等、CRLF 保留、跨行调用保守跳过并计数报告。
+
+### 修复
+- **`_parse_pitch_name_to_midi` 降号音名全灭**：`text[:i].upper()` 把
+  `"Bb"` 变 `"BB"`，`_PITCH_TONE` 表查不到——docstring 自己的 `'Bb2'`
+  示例都返回 None。改为原样查找 + `capitalize()` 回退（`bb2`/`Bb`/`GB` 均可）。
+- **`_beats_per_bar("4/0")` 除零崩溃**：`except` 补 `ZeroDivisionError`，
+  回退 4.0。
+
+### 移除
+- `_chords_track` sustain 分支中数学上不可达的越界 `break`
+  （`t=(n-1)·bpb/max(4,n) < bpb` 恒成立）。
+
+### 测试
+- `tests/test_generators.py` +11（F2）：procedural.py 覆盖率 **81% → 95%**
+  （half/block 密度、音域外双回退、variation 三档、辅助函数边界全套）。
+- `tests/test_setup_scripts.py` 新增 12 例（F5/F6）：check 三态、main 退出码、
+  补丁幂等/跨行跳过/CRLF 保留/缺失目录安全。
+
 ## [1.4.7] - 2026-10-08（审计收尾：F1 doctor / F3 video CLI 测试 / L3 死代码）
 
 > 来源：`docs/reports/plan-1.4.7.md`（审计建议批次表第 2 行）。无破坏性变更。
