@@ -2,6 +2,22 @@
 
 本项目遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.0.0/) 风格。
 
+## [1.5.5] - 2026-10-09（真实引擎音频回归语料）
+
+### 新增
+- **`tests/test_regression_real_audio.py`（12 例）**：真值 MIDI（程序化生成）
+  → **真 FluidSynth + GeneralUser GS 渲染** → tempo / transcribe 无回归断言。
+  区别于既有 mock_fluidsynth / 合成正弦 fixture，首次把「真实 SF2 音色 +
+  渲染子进程 + 分析链」整体纳入回归保护。语料两段：120 BPM C 大调 16 音、
+  90 BPM a 小调 12 音（四分断奏）。
+- 断言口径（2026-10-08 实测基线 × 数倍余量）：BPM 绝对误差 ≤0.6、拍相位
+  ≤30ms（基线 ≤8ms）、置信度 ≥0.5；转谱音高 ±2 半音容差匹配 ≥90%（基线
+  100%——内置后端在真实钢琴音色上无容差直配仅 ~50%，谐波重叠所致，属
+  文档化已知边界）、音符数 truth ~ truth+12、1/8 拍网格对齐、内部测速一致。
+- **环境自适应 skip**：SF2 缺失/为 LFS 指针、fluidsynth（module 内置或 PATH）
+  不可用时整文件 skip——CI（apt fluidsynth + `git lfs pull` sf2）可跑，
+  语料 session 级渲染一次（<2s），不落库、零 LFS 带宽开销。
+
 ## [1.5.4] - 2026-10-09（≥160BPM 边界提示）
 
 ### 新增
