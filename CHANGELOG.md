@@ -2,6 +2,27 @@
 
 本项目遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.0.0/) 风格。
 
+## [1.6.0] - 2026-10-09（通用转码中枢：音频互转 + 视频分离音轨）
+
+### 新增
+- **`sunoauxtool.download.convert`**（DownloadHelper 媒体转换中枢首批能力）：
+  - **音频互转** mp3/wav/m4a/flac 全方向（libmp3lame / pcm_s16le·s24le /
+    aac / flac 编码映射），支持码率/采样率/位深参数；
+  - **视频分离音轨** mp4/mov/flv/webm/mkv/avi/m4v：ffprobe 读音轨 codec，
+    可无损放入目标容器时 `-c:a copy` **零损直通**（aac→m4a 等），否则回退
+    重编码；无音轨明确报错；
+  - **输出预设** `suno`（44.1k/16bit wav）/ `lossless`（flac）/ `web`
+    （mp3 192k），显式参数优先。
+- CLI：`downloadhelper convert` / `downloadhelper extract-audio`；
+  聚合镜像 `sunoaux post convert-audio` / `sunoaux post extract-audio`
+  （`post convert` 保持 fMP4 decode 旧映射不变）。
+- ffmpeg 引擎复用两层环境变量定位；错误码沿用 download 域 20/23/24。
+- 测试：33 例（ffmpeg 合成源 4×4 互转矩阵、直通/重编码分支、预设/位深/
+  采样率断言、错误路径）。
+- `.gitignore examples/`（参考项目仅本地研读）；README 新增「致谢 / 相关
+  项目」友情链接（ncm2mp3 / ncmdump / ncm2mp3-js / SUNO Capture / DLBunny，
+  零代码依赖）。方案文档：docs/reports/plan-1.7-convert-ncm.md。
+
 ## [1.5.6] - 2026-10-09（全流程验证 bugfix：inspire 懒建表 + musicgen 深依赖收口）
 
 ### 修复

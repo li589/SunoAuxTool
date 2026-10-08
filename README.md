@@ -168,6 +168,12 @@ export SUNO_FFMPEG=/d/tools/ffmpeg/bin/ffmpeg.exe   # ffmpeg 不在 PATH 时：�
 downloadhelper probe  "Suno _ AI Music.mp3"      # 取证判定
 downloadhelper decode "Suno _ AI Music.mp3" -o ./out
 downloadhelper batch  ./downloads -o ./out       # 批量，密文自动跳过
+
+# —— 通用转码中枢（1.6.0）——
+downloadhelper convert song.flac --fmt mp3 --bitrate 320k    # 音频互转
+downloadhelper convert song.mp3 --profile suno               # 44.1k/16bit wav 合规预设
+downloadhelper extract-audio clip.mp4 --fmt m4a              # 视频分离音轨（AAC 直通零损）
+sunoaux post convert-audio / extract-audio                   # 聚合入口镜像
 ```
 
 > **命名**：三包合一后本子包为 **`sunoauxtool.download`**（CLI 入口 **`downloadhelper`**）。
@@ -177,6 +183,17 @@ downloadhelper batch  ./downloads -o ./out       # 批量，密文自动跳过
 
 详见 [docs/downloadhelper.md](docs/downloadhelper.md)（三包合一后子包位于
 `src/sunoauxtool/download/`，原 `src/Suno-Cat-Catch-Resolve/` 目录已移除）。
+
+### 致谢 / 相关项目
+
+转码与 NCM 解包设计过程中参考了下列优秀项目（**仅设计参考，零代码依赖**，
+`examples/` 目录本地研读不入库）：
+
+- [ncm2mp3](https://github.com/xzrdmm/ncm2mp3) —— 纯 Python 标准库网易云 NCM 解锁
+- [ncmdump](https://github.com/taurusxin/ncmdump) —— C++ NCM 转储实现
+- [ncm2mp3-js](https://github.com/lisencheng/ncm2mp3-js) —— Web/ekey 路线参考
+- SUNO Capture —— Chrome 扩展：suno.com 页面注入 MP3/WAV 下载按钮
+- [DLBunny](https://dlbunny.com/) —— Suno 在线音频下载站
 
 ---
 

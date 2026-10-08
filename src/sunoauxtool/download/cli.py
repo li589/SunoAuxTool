@@ -122,6 +122,65 @@ def batch(
             typer.echo(f"  ! {item}")
 
 
+@app.command("convert")
+def convert(
+    input: Path = typer.Argument(..., help="输入音频（mp3/wav/m4a/flac）"),
+    out: Path = typer.Option(Path("."), "-o", "--out", help="输出目录，默认当前目录"),
+    fmt: Optional[str] = typer.Option(None, "--fmt", help="目标格式: mp3 | wav | m4a | flac（默认 mp3）"),
+    bitrate: Optional[str] = typer.Option(None, "--bitrate", help="有损码率，如 192k（默认 192k）"),
+    sample_rate: Optional[int] = typer.Option(None, "--sample-rate", help="目标采样率（默认保持源）"),
+    bit_depth: Optional[int] = typer.Option(None, "--bit-depth", help="wav 位深: 16 | 24（默认 16）"),
+    profile: Optional[str] = typer.Option(None, "--profile", help="预设: suno | lossless | web（显式参数优先）"),
+    stem: Optional[str] = typer.Option(None, "--stem", help="输出文件名主干（默认输入文件名）"),
+    overwrite: bool = typer.Option(False, "--overwrite", help="覆盖已存在的输出文件"),
+    ffmpeg: Optional[str] = typer.Option(None, "--ffmpeg-path", help="ffmpeg 绝对路径"),
+) -> None:
+    """音频格式互转（1.6.0）：mp3 / wav / m4a / flac。"""
+    from sunoauxtool.download.convert import convert_audio
+
+    try:
+        result = convert_audio(
+            input, out, fmt=fmt, bitrate=bitrate, sample_rate=sample_rate,
+            bit_depth=bit_depth, profile=profile, stem=stem,
+            overwrite=overwrite, ffmpeg=ffmpeg,
+        )
+    except SunoError as exc:
+        typer.echo(f"错误[{exc.code}]: {exc.message}", err=True)
+        raise typer.Exit(code=exc.code or 1) from None
+    typer.echo(f"已转换: {result}")
+
+
+@app.command("extract-audio")
+def extract_audio(
+    video: Path = typer.Argument(..., help="输入视频（mp4/mov/flv/webm/mkv/avi/m4v）"),
+    out: Path = typer.Option(Path("."), "-o", "--out", help="输出目录，默认当前目录"),
+    fmt: Optional[str] = typer.Option(None, "--fmt", help="目标格式: mp3 | wav | m4a | flac（默认 mp3）"),
+    bitrate: Optional[str] = typer.Option(None, "--bitrate", help="有损码率（默认 192k）"),
+    sample_rate: Optional[int] = typer.Option(None, "--sample-rate", help="目标采样率（默认保持源）"),
+    bit_depth: Optional[int] = typer.Option(None, "--bit-depth", help="wav 位深: 16 | 24"),
+    profile: Optional[str] = typer.Option(None, "--profile", help="预设: suno | lossless | web"),
+    stem: Optional[str] = typer.Option(None, "--stem", help="输出文件名主干"),
+    overwrite: bool = typer.Option(False, "--overwrite", help="覆盖已存在的输出文件"),
+    copy_first: bool = typer.Option(
+        True, "--copy/--no-copy", help="源音轨可无损放入目标容器时直通（不重编码）"
+    ),
+    ffmpeg: Optional[str] = typer.Option(None, "--ffmpeg-path", help="ffmpeg 绝对路径"),
+) -> None:
+    """从视频分离音轨（1.6.0）：优先无损直通，回退重编码。"""
+    from sunoauxtool.download.convert import extract_audio as _extract
+
+    try:
+        result = _extract(
+            video, out, fmt=fmt, bitrate=bitrate, sample_rate=sample_rate,
+            bit_depth=bit_depth, profile=profile, stem=stem,
+            overwrite=overwrite, copy_first=copy_first, ffmpeg=ffmpeg,
+        )
+    except SunoError as exc:
+        typer.echo(f"错误[{exc.code}]: {exc.message}", err=True)
+        raise typer.Exit(code=exc.code or 1) from None
+    typer.echo(f"已提取: {result}")
+
+
 @app.command()
 def version() -> None:
     """打印版本与 ffmpeg 位置。"""
