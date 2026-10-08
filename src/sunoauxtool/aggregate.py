@@ -96,6 +96,9 @@ post_app.command("convert-audio", help="(= downloadhelper convert) 音频互转 
 post_app.command("extract-audio", help="(= downloadhelper extract-audio) 视频分离音轨（直通优先）")(
     download_cli.extract_audio
 )
+post_app.command("ncm", help="(= downloadhelper ncm) NCM 解包：网易云容器还原 flac/mp3")(
+    download_cli.ncm
+)
 @post_app.command(
     "fetch",
     help="取回音频（R7）：catcatch=猫抓缓存扫描转码（默认）；suno-api/haimeng/tianyin=API 源",

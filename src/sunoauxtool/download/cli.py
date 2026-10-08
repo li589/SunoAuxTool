@@ -181,6 +181,35 @@ def extract_audio(
     typer.echo(f"已提取: {result}")
 
 
+@app.command("ncm")
+def ncm(
+    file: Path = typer.Argument(..., help="输入 .ncm 文件（网易云加密容器）"),
+    out: Path = typer.Option(Path("."), "-o", "--out", help="输出目录，默认当前目录"),
+    stem: Optional[str] = typer.Option(None, "--stem", help="输出文件名主干（默认按元数据命名）"),
+    cover: bool = typer.Option(True, "--cover/--no-cover", help="是否同时导出封面图"),
+    overwrite: bool = typer.Option(False, "--overwrite", help="覆盖已存在的输出文件"),
+) -> None:
+    """解包 NCM 为原始音频（1.6.1）：flac/mp3 原样还原，不做转码。"""
+    from sunoauxtool.download.ncm import unpack_file
+
+    if out.exists() and not out.is_dir():
+        typer.echo(f"错误: 输出路径不是目录: {out}", err=True)
+        raise typer.Exit(code=24)
+    try:
+        paths = unpack_file(file, out, stem=stem, write_cover=cover, overwrite=overwrite)
+    except FileExistsError as exc:
+        typer.echo(f"错误: {exc}（加 --overwrite 覆盖）", err=True)
+        raise typer.Exit(code=23) from None
+    except SunoError as exc:
+        typer.echo(f"错误[{exc.code}]: {exc.message}", err=True)
+        raise typer.Exit(code=exc.code or 1) from None
+    except OSError as exc:
+        typer.echo(f"错误[24]: {exc}", err=True)
+        raise typer.Exit(code=24) from None
+    for path in paths:
+        typer.echo(f"已解包: {path}")
+
+
 @app.command()
 def version() -> None:
     """打印版本与 ffmpeg 位置。"""

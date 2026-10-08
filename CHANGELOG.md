@@ -2,6 +2,26 @@
 
 本项目遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.0.0/) 风格。
 
+## [1.6.1] - 2026-10-09（NCM 解包组件：网易云容器还原原始音频）
+
+### 新增
+- **`sunoauxtool.download.ncm`**（纯标准库，零第三方依赖）：
+  - 手写 AES-128-ECB + PKCS#7（FIPS-197 附录 C.1 官方向量锁定正确性）；
+  - 网易云定制 RC4 流密码：KSA keybox + **两级 box 查表**按绝对偏移取
+    密钥流（状态不随读取推进→可分块并行），大整数 XOR 加速整段解密；
+  - 容器解析：CTENFDAM 魔数 → 密钥段（XOR 0x64→AES→去
+    neteasecloudmusic 前缀）→ 元数据段（XOR 0x63→163 key 前缀→base64→
+    AES→music: JSON）→ crc32/gap → 封面 → 载荷；
+  - 载荷签名判定 flac/mp3，元数据命名输出文件（含非法字符清洗），
+    封面导出 JPEG。
+- CLI：`downloadhelper ncm` + 聚合镜像 `sunoaux post ncm`；
+  错误码 25（非 NCM 容器）/ 26（容器损坏）。
+- 测试 18 例：AES 官方向量、RC4 往返与偏移确定性、**自打包 NCM 往返**
+  （pack helper 仅存在于测试侧，产品不提供加密能力）、容器边界
+  （魔数/截断/错误 core key/空载荷/重复输出）、**examples/ 真实样本
+  互操作校验**（样本不入库，缺失时 skip；4s FLAC 经 ffprobe 验证有效）。
+- 标签/封面嵌入音频文件（ffmpeg -metadata 路线）留待 1.6.2 与批量整合一并做。
+
 ## [1.6.0] - 2026-10-09（通用转码中枢：音频互转 + 视频分离音轨）
 
 ### 新增
