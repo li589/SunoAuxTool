@@ -2,6 +2,30 @@
 
 本项目遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.0.0/) 风格。
 
+## [1.5.0] - 2026-10-09（F4 DSP 链增强：三段 EQ + 噪声门 + batch 结构化报告）
+
+> 审计批次表 F4（"1.5/1.6 候选"）落地；`loudnorm --ceiling` 已在 1.4.6（B1）先行交付，
+> 本版补齐其余三项。特性版本（minor bump）。
+
+### 新增
+- **`eq` 频段 EQ 算子**（`dsp/filters.py` + `dsp/ops.py`）：
+  `eq <peak|lowshelf|highshelf> <freq_hz> <gain_db> [q]`——RBJ Audio EQ
+  Cookbook biquad（scipy lfilter 逐声道）。peak 在中心频率处增益**解析精确**
+  （|H(ω₀)| = 10^(gain/20)，测试按此断言）；shelf 固定 S=1 斜率。
+  `gain=0` 恒等；频段名非法 / freq ≥ Nyquist / |gain| > 24 dB / q ≤ 0 → 16。
+- **`gate` 噪声门算子**：`gate <threshold_db> [attack_ms] [release_ms]`
+  （默认 -50/5/100）。低于门限渐闭到静音：attack 即时打开 + maximum_filter1d
+  防抖保持，release 在**亏损域**（deficit = 1-need）一阶低通平滑关闭——与
+  limiter 同套路（直接低通 need 会让短促开段关门从低值起衰，实测踩过）。
+  与 `expand`（软比例衰减）互补：硬门限 + 时间平滑。
+- **batch `--report` 结构化报告**（`batch.write_report()`）：`.json`（版本/
+  时间/命令回放/汇总/逐项明细含采样参数）/`.csv`（固定 12 列，utf-8-sig
+  Excel 友好）。**部分失败也完整落盘**（失败项含 error 字段）；扩展名非法
+  → ParameterError(1)。
+
+### 文档
+- `docs/dsp.md` 算子一览补 `eq` / `gate` 两行。
+
 ## [1.4.8] - 2026-10-08（F5 basic-pitch 脚手架 + F6 torch.load 补丁链 + F2 覆盖率）
 
 > 审计建议批次表第 3 行的「按方向分批」第一批：工具链补强 + 覆盖率，零行为变更

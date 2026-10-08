@@ -230,6 +230,65 @@ def op_lowcut(audio: np.ndarray, sr: int, args: Dict[str, str]) -> Tuple[np.ndar
     return filters.highpass(audio, sr, hz), sr
 
 
+def op_eq(audio: np.ndarray, sr: int, args: Dict[str, str]) -> Tuple[np.ndarray, int]:
+    """频段 EQ（1.5.0 F4）：``eq <peak|lowshelf|highshelf> <freq_hz> <gain_db> [q]``。
+
+    - peak：峰值 EQ（中心 freq 处增益 gain，Q 控制带宽，默认 1.0）；
+    - lowshelf / highshelf：低/高搁架（freq 以下/以上整体抬降，固定 S=1）。
+
+    频段名非法 / freq 越界（含 ≥ Nyquist）/ |gain| > 24 dB / q <= 0 → 16。
+    例：``eq lowshelf 120 -3, eq peak 2500 4 0.8, eq highshelf 9000 2``。
+    """
+    band = str(args.get("arg", ""))
+    if band not in filters.EQ_BANDS:
+        raise DspParamError(
+            f"eq 频段须为 {', '.join(filters.EQ_BANDS)} 之一: {band!r}", code=16
+        )
+    freq_raw = args.get("_1", "")
+    gain_raw = args.get("_2", "")
+    try:
+        freq = float(freq_raw)
+        gain = float(gain_raw)
+    except ValueError as exc:
+        raise DspParamError(f"eq 频率/增益非法: {freq_raw!r} {gain_raw!r}", code=16) from exc
+    q_raw = args.get("_3", "1.0")
+    try:
+        q = float(q_raw)
+    except ValueError as exc:
+        raise DspParamError(f"eq Q 非法: {q_raw!r}", code=16) from exc
+    try:
+        return filters.eq_band(audio, sr, band, freq, gain, q), sr
+    except ValueError as exc:
+        raise DspParamError(f"eq 参数非法: {exc}", code=16) from exc
+
+
+def op_gate(audio: np.ndarray, sr: int, args: Dict[str, str]) -> Tuple[np.ndarray, int]:
+    """噪声门（1.5.0 F4）：``gate <threshold_db> [attack_ms] [release_ms]``。
+
+    低于阈值（dBFS，默认 -50）的部分渐闭到静音；attack（默认 5ms）防抖、
+    release（默认 100ms）平滑关闭，与 expand（软比例衰减）互补：
+    gate 是硬门限 + 时间平滑，expand 是连续软曲线。参数非法 → 16。
+    """
+    thr_raw = args.get("arg", "-50")
+    atk_raw = args.get("_1", "5")
+    rel_raw = args.get("_2", "100")
+    try:
+        thr = float(thr_raw)
+        atk = float(atk_raw)
+        rel = float(rel_raw)
+    except ValueError as exc:
+        raise DspParamError(
+            f"gate 参数非法: {thr_raw!r} {atk_raw!r} {rel_raw!r}", code=16
+        ) from exc
+    if thr >= 0:
+        raise DspParamError(f"gate 阈值须 < 0 dBFS: {thr}", code=16)
+    if atk < 0:
+        raise DspParamError(f"gate attack 须 >= 0 ms: {atk}", code=16)
+    if rel < 0:
+        raise DspParamError(f"gate release 须 >= 0 ms: {rel}", code=16)
+    return filters.gate(audio, sr, threshold_db=thr, attack_ms=atk, release_ms=rel), sr
+
+
 def op_compress(audio: np.ndarray, sr: int, args: Dict[str, str]) -> Tuple[np.ndarray, int]:
     """压缩：``compress 3 [-14]``（ratio须>=1；threshold dBFS 默认 -12）。"""
     ratio = float(args.get("arg", "2"))
@@ -352,6 +411,8 @@ OPS: Dict[str, OpFunc] = {
     "trim": op_trim,
     "resample": op_resample,
     "lowcut": op_lowcut,
+    "eq": op_eq,
+    "gate": op_gate,
     "compress": op_compress,
     "expand": op_expand,
     "limiter": op_limiter,

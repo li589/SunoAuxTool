@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+import csv
+import json
 from pathlib import Path
 
 import pytest
 from typer.testing import CliRunner
 
-from sunoauxtool.batch import BatchOptions, BatchRunner
+from sunoauxtool.batch import BatchOptions, BatchRunner, write_report
 from sunoauxtool.cli import app
 from sunoauxtool.config import Config
 from sunoauxtool.exceptions import ParameterError
@@ -180,3 +182,100 @@ def test_batch_cli_render_chain(tmp_project, mock_fluidsynth, mock_path_resolver
     assert len(mids) == 2
     metadata = list(Path("output").rglob("metadata.json"))
     assert len(metadata) == 1
+
+
+# ---------------------------------------------------------------------------
+# 1.5.0 F4：batch 结构化报告导出（JSON/CSV）
+# ---------------------------------------------------------------------------
+
+
+def test_batch_report_json(tmp_path):
+    """JSON 报告：汇总 + 逐项明细 + 命令回放，字段完整。"""
+    result = _run(tmp_path, count=2, seed=42)
+    report = write_report(result, tmp_path / "report.json")
+    assert report.exists()
+    data = json.loads(report.read_text(encoding="utf-8"))
+    assert data["summary"] == {"total": 2, "ok": 2, "failed": 0}
+    assert data["actual_seed"] == 42
+    assert "batch --count 2 --seed 42" in data["command"]
+    assert data["version"]
+    assert len(data["items"]) == 2
+    item = data["items"][0]
+    assert item["status"] == "ok"
+    assert item["seed"] == 42000
+    assert item["midi_path"]
+    assert item["chords"] and item["style"] and item["bpm"]
+
+
+def test_batch_report_csv(tmp_path):
+    """CSV 报告：BOM 头 + 固定列 + 逐行对应。"""
+    result = _run(tmp_path, count=3, seed=42)
+    report = write_report(result, tmp_path / "report.csv")
+    text = report.read_text(encoding="utf-8-sig")
+    rows = list(csv.DictReader(text.splitlines()))
+    assert len(rows) == 3
+    assert rows[0]["seed"] == "42000"
+    assert rows[0]["status"] == "ok"
+    assert rows[0]["midi_path"]
+    assert rows[0]["chords"]
+
+
+def test_batch_report_includes_failed_items(tmp_path, monkeypatch):
+    """部分失败：报告完整落盘，失败项含 error 字段（报告价值正在于此）。"""
+    real_gen = proc_mod.ProceduralGenerator.generate
+
+    def flaky(self, request):
+        if request.seed is not None and request.seed % 1000 == 1:
+            raise ParameterError("模拟失败", code=1)
+        return real_gen(self, request)
+
+    monkeypatch.setattr(proc_mod.ProceduralGenerator, "generate", flaky)
+    result = _run(tmp_path, count=3, seed=42)
+    assert result.failed_count == 1
+    report = write_report(result, tmp_path / "r.json")
+    data = json.loads(report.read_text(encoding="utf-8"))
+    assert data["summary"] == {"total": 3, "ok": 2, "failed": 1}
+    failed = [i for i in data["items"] if i["status"] == "failed"]
+    assert len(failed) == 1
+    assert "模拟失败" in failed[0]["error"]
+
+
+def test_batch_report_invalid_extension(tmp_path):
+    result = _run(tmp_path, count=1, seed=42)
+    with pytest.raises(ParameterError):
+        write_report(result, tmp_path / "report.txt")
+
+
+def test_batch_cli_report_json_dry_run(tmp_project):
+    """CLI --report：dry-run 下同样产出 JSON 报告（不写 MIDI 产物）。"""
+    out = tmp_project / "rep" / "batch.json"
+    result = runner.invoke(
+        app, ["batch", "--count", "3", "--seed", "42", "--dry-run", "--report", str(out)]
+    )
+    assert result.exit_code == 0, result.output
+    assert out.exists()
+    data = json.loads(out.read_text(encoding="utf-8"))
+    assert len(data["items"]) == 3
+    assert data["summary"]["ok"] == 3
+    assert "批次报告" in result.output
+
+
+def test_batch_cli_report_csv_partial_failure(tmp_project, monkeypatch):
+    """CLI --report：部分失败（退出码 8）时 CSV 报告仍完整落盘。"""
+    real_gen = proc_mod.ProceduralGenerator.generate
+
+    def flaky(self, request):
+        if request.seed is not None and request.seed % 1000 == 1:
+            raise ParameterError("模拟失败", code=1)
+        return real_gen(self, request)
+
+    monkeypatch.setattr(proc_mod.ProceduralGenerator, "generate", flaky)
+    out = tmp_project / "batch.csv"
+    result = runner.invoke(
+        app, ["batch", "--count", "3", "--seed", "42", "--report", str(out)]
+    )
+    assert result.exit_code == 8
+    assert out.exists()
+    rows = list(csv.DictReader(out.read_text(encoding="utf-8-sig").splitlines()))
+    assert len(rows) == 3
+    assert sum(1 for r in rows if r["status"] == "failed") == 1

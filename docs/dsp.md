@@ -23,6 +23,8 @@ sunoaux post dsp <wav> --ops "<算子串>" [-o out.wav] [--bit-depth 16|24]
 | `trim` | `trim 10-25` | 裁剪 [START, END) 秒；区间非法/越界 → 16 |
 | `resample` | `resample 32000` | scipy `resample_poly`（polyphase 抗混叠）；采样率相同为 no-op |
 | `lowcut` | `lowcut 80` | 一阶高通低频切（复用既有 `filters.highpass`） |
+| `eq` | `eq <peak\|lowshelf\|highshelf> <freq_hz> <gain_db> [q]` | **频段 EQ（1.5.0 F4）**：RBJ cookbook biquad。`peak` 中心频率处精确增益（Q 控制带宽，默认 1.0）；`lowshelf`/`highshelf` 低/高搁架（固定 S=1 斜率）。`gain_db=0` 恒等；\|gain\| > 24 dB / freq ≥ Nyquist / q ≤ 0 / 频段名非法 → 16。例：`eq lowshelf 120 -3, eq peak 2500 4 0.8` |
+| `gate` | `gate <threshold_db> [attack_ms] [release_ms]` | **噪声门（1.5.0 F4）**：低于阈值（dBFS，默认 -50）的部分渐闭到静音；attack（默认 5ms）即时打开 + 防抖保持，release（默认 100ms）平滑关闭。与 `expand`（软比例衰减）互补：gate 是硬门限 + 时间平滑。阈值 ≥0 / attack/release < 0 → 16 |
 | `compress` | `compress 3 [-14]` | 软拐点压缩：ratio（≥1）+ 阈值 dBFS（默认 -12） |
 | `expand` | `expand 2 [-30]` | **向下扩展（1.4.0）**：低于阈值的部分按 ratio 衰减（ratio ≥1，=1 恒等；阈值 dBFS 默认 -30）。用于压低底噪/弱段 |
 | `limiter` | `limiter [-0.3] [5]` | **前瞻拐点限幅（1.4.0）**：峰值硬顶在 ceiling dBFS（默认 -0.3）之下，brickwall 有数学保证；lookahead ms（默认 5）+ release 50ms 固定。ceiling ≥0 / lookahead <0 → 16 |

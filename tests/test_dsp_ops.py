@@ -543,3 +543,100 @@ def test_concat_channel_mismatch_raises_16(tmp_path):
 
     with pytest.raises(DspParamError):
         apply_ops(stereo, SR, parse_ops(f"concat {pm}"))
+
+
+# ---------------------------------------------------------------------------
+# 1.5.0 F4：eq（RBJ 三段 EQ）与 gate（噪声门）
+# ---------------------------------------------------------------------------
+
+
+def _rms(x: np.ndarray) -> float:
+    return float(np.sqrt(np.mean(np.asarray(x, dtype=np.float64) ** 2)))
+
+
+def test_eq_peak_center_gain_exact():
+    """peak EQ 在中心频率处增益恰为 10^(gain/20)（RBJ 解析性质）。"""
+    sig = _sine(freq=1000.0, sec=1.0)
+    out, _ = apply_ops(sig, SR, parse_ops("eq peak 1000 6"))
+    ratio = _rms(out[2000:]) / _rms(sig[2000:])
+    assert ratio == pytest.approx(10 ** (6 / 20), rel=0.05)
+
+
+def test_eq_shelf_low_boost_high_cut():
+    """lowshelf 抬低频 / highshelf 压高频（shelf 固定 S=1，允许拐点内余量）。"""
+    low = _sine(freq=60.0, sec=1.0)
+    out, _ = apply_ops(low, SR, parse_ops("eq lowshelf 200 6"))
+    assert _rms(out[2000:]) / _rms(low[2000:]) == pytest.approx(2.0, rel=0.15)
+
+    high = _sine(freq=12000.0, sec=1.0)
+    out2, _ = apply_ops(high, SR, parse_ops("eq highshelf 8000 -6"))
+    assert _rms(out2[2000:]) / _rms(high[2000:]) == pytest.approx(0.5, rel=0.15)
+
+
+def test_eq_zero_gain_identity():
+    sig = _sine(freq=440.0, sec=0.2)
+    out, _ = apply_ops(sig, SR, parse_ops("eq peak 1000 0"))
+    assert np.allclose(out, sig)
+
+
+def test_eq_multichannel_independent():
+    sig = np.stack([_sine(freq=1000.0, sec=0.5)] * 2, axis=1)
+    out, out_sr = apply_ops(sig, SR, parse_ops("eq peak 1000 6"))
+    assert out.shape == sig.shape and out_sr == SR
+    assert np.allclose(out[:, 0], out[:, 1])
+
+
+def test_eq_param_errors_exit_16():
+    sig = _sine(freq=440.0, sec=0.1)
+    for spec in (
+        "eq band 1000 3",      # 频段名非法
+        "eq peak 30000 3",     # >= Nyquist (24000)
+        "eq peak 1000 30",     # |gain| > 24
+        "eq peak 1000 3 0",    # q <= 0
+        "eq peak abc 3",       # 频率非数字
+    ):
+        with pytest.raises(DspParamError, match="eq"):
+            apply_ops(sig, SR, parse_ops(spec))
+
+
+def test_gate_silences_noise_floor():
+    """大声段全保留，低于阈值的底噪段在 release 后关门到近静音。"""
+    loud = _sine(freq=1000.0, sec=0.5)
+    quiet = (0.001 * np.random.RandomState(7).standard_normal(SR // 2)).astype(np.float32)
+    sig = np.concatenate([loud, quiet])
+    out, _ = apply_ops(sig, SR, parse_ops("gate -40"))
+    assert np.max(np.abs(out[: SR // 2 - 100])) == pytest.approx(0.5, abs=0.01)
+    assert np.max(np.abs(out[SR // 2 + int(0.3 * SR):])) < 1e-3
+
+
+def test_gate_keeps_above_threshold_unchanged():
+    sig = _sine(freq=440.0, sec=0.5)
+    out, _ = apply_ops(sig, SR, parse_ops("gate -40"))
+    assert np.allclose(out, sig)
+
+
+def test_gate_release_decay_curve():
+    """关断后增益按 release 时间常数渐降（前段近全通过、后段明显衰减）。"""
+    loud = _sine(freq=1000.0, sec=0.3)
+    quiet = _sine(freq=1000.0, sec=0.6, amp=0.001)  # -60dBFS，低于门限
+    sig = np.concatenate([loud, quiet])
+    out, _ = apply_ops(sig, SR, parse_ops("gate -40 5 500"))
+    early = out[SR // 3 + int(0.01 * SR): SR // 3 + int(0.02 * SR)]
+    late = out[SR // 3 + int(0.4 * SR): SR // 3 + int(0.41 * SR)]
+    assert np.max(np.abs(early)) == pytest.approx(0.001, rel=0.2)   # release=500ms 初段≈1
+    assert np.max(np.abs(late)) < 0.7e-3                            # 0.4s 后 ≈ exp(-0.8)≈0.45
+
+
+def test_gate_param_errors_exit_16():
+    sig = _sine(freq=440.0, sec=0.1)
+    for spec in ("gate 0", "gate -40 -1", "gate -40 5 -1", "gate abc"):
+        with pytest.raises(DspParamError):
+            apply_ops(sig, SR, parse_ops(spec))
+
+
+def test_eq_gate_chain():
+    """组合链：eq 抬增益 + gate 保响度段——增益后的信号仍高于门限不被关门。"""
+    sig = _sine(freq=1000.0, sec=0.5)
+    out, out_sr = apply_ops(sig, SR, parse_ops("eq peak 1000 6, gate -40"))
+    assert out_sr == SR
+    assert _rms(out[2000:]) / _rms(sig[2000:]) == pytest.approx(2.0, rel=0.05)

@@ -10,6 +10,8 @@
 
 from __future__ import annotations
 
+import csv
+import json
 import random
 import threading
 from concurrent.futures import ThreadPoolExecutor
@@ -66,6 +68,7 @@ class BatchOptions:
     project: Optional[str] = None              # P2-5 项目名
     output_dir: Optional[str] = None           # P2-5 输出根覆盖
     dry_run: bool = False
+    report: Optional[str] = None               # F4：结构化报告路径（.json/.csv 按扩展名）
     # 生成参数
     bpm: Optional[int] = None
     bars: Optional[int] = None
@@ -108,6 +111,91 @@ class BatchResult:
     @property
     def failed_count(self) -> int:
         return len(self.items) - self.ok_count
+
+
+#: CSV 报告固定列（F4）；params 内的四个采样维度平铺进列
+_CSV_COLUMNS = [
+    "index", "seed", "status", "duration_s",
+    "style", "chords", "rhythm_pattern", "bpm",
+    "midi_path", "wav_path", "export_path", "error",
+]
+
+
+def write_report(result: BatchResult, path: str | Path) -> Path:
+    """结构化批次报告导出（F4）：按扩展名 ``.json`` / ``.csv`` 写入。
+
+    - JSON：完整结构（版本 / 时间 / 命令 / 汇总 / options / 逐项明细含 params）；
+    - CSV：``_CSV_COLUMNS`` 平铺列（Excel 友好，utf-8-sig 带 BOM）。
+
+    部分失败也会完整落盘（失败项含 error 字段）——报告的价值正在于此。
+    扩展名非法 → ParameterError(1)；父目录不存在自动创建。
+    """
+    p = Path(path)
+    suffix = p.suffix.lower()
+    opts = result.options
+    p.parent.mkdir(parents=True, exist_ok=True)
+
+    def _item_row(item: BatchItemResult) -> Dict[str, Any]:
+        params = item.params or {}
+        return {
+            "index": item.index,
+            "seed": item.seed,
+            "status": item.status,
+            "duration_s": round(item.duration_s, 3),
+            "style": params.get("style"),
+            "chords": params.get("chords"),
+            "rhythm_pattern": params.get("rhythm_pattern"),
+            "bpm": params.get("bpm"),
+            "midi_path": item.midi_path,
+            "wav_path": item.wav_path,
+            "export_path": item.export_path,
+            "error": item.error,
+        }
+
+    if suffix == ".json":
+        payload = {
+            "version": __version__,
+            "generated_at": datetime.now().isoformat(timespec="seconds"),
+            "command": BatchRunner._command(opts, result.actual_seed or 0),
+            "actual_seed": result.actual_seed,
+            "summary": {
+                "total": len(result.items),
+                "ok": result.ok_count,
+                "failed": result.failed_count,
+            },
+            "options": {
+                "count": opts.count,
+                "seed": opts.seed,
+                "style": opts.style,
+                "variations": opts.variations,
+                "render": opts.render,
+                "export": opts.export,
+                "parallel": opts.parallel,
+                "dry_run": opts.dry_run,
+                "bpm": opts.bpm,
+                "bars": opts.bars,
+                "key": opts.key,
+                "with_drums": opts.with_drums,
+            },
+            "items": [_item_row(i) for i in result.items],
+        }
+        p.write_text(
+            json.dumps(payload, ensure_ascii=False, indent=2) + "\n",
+            encoding="utf-8",
+            newline="\n",
+        )
+    elif suffix == ".csv":
+        with open(p, "w", encoding="utf-8-sig", newline="") as f:
+            writer = csv.DictWriter(f, fieldnames=_CSV_COLUMNS)
+            writer.writeheader()
+            for item in result.items:
+                row = _item_row(item)
+                writer.writerow({k: ("" if row[k] is None else row[k]) for k in _CSV_COLUMNS})
+    else:
+        raise ParameterError(
+            f"批次报告格式仅支持 .json / .csv: {path}", code=1
+        )
+    return p
 
 
 class BatchRunner:

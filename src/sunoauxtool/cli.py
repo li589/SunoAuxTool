@@ -512,6 +512,9 @@ def batch_cmd(
     project: Optional[str] = typer.Option(None, "--project", help="输出项目名（P2-5）"),
     output_dir: Optional[Path] = typer.Option(None, "--output-dir", help="输出根目录覆盖"),
     dry_run: bool = typer.Option(False, "--dry-run", help="仅规划并打印，不写产物"),
+    report: Optional[Path] = typer.Option(
+        None, "--report", help="结构化批次报告路径（F4；.json/.csv 按扩展名识别）"
+    ),
     bpm: Optional[int] = typer.Option(None, "--bpm", help="固定 BPM（覆盖预设）"),
     bars: Optional[int] = typer.Option(None, "--bars", help="小节数"),
     with_drums: bool = typer.Option(False, "--with-drums", help="追加鼓轨"),
@@ -530,6 +533,7 @@ def batch_cmd(
         melody_variants=melody_variants, render=render, export=export,
         parallel=parallel, parallel_workers=parallel_workers,
         project=project, output_dir=output_dir, dry_run=dry_run,
+        report=str(report) if report else None,
         bpm=bpm, bars=bars, with_drums=with_drums,
         voice_leading=voice_leading, counterpoint=counterpoint,
         inversion=inversion, rhythm_pattern=rhythm,
@@ -552,6 +556,13 @@ def batch_cmd(
         f"{'[DRY-RUN] ' if dry_run else '✅ '}批量完成: 成功 {result.ok_count} / "
         f"失败 {result.failed_count}（全局 seed={result.actual_seed}）"
     )
+
+    # F4：结构化报告（部分失败也完整落盘，失败项含 error 字段）
+    if options.report:
+        from sunoauxtool.batch import write_report
+
+        report_path = write_report(result, options.report)
+        typer.echo(f"📄 批次报告: {report_path}")
 
     if result.failed_count == 0:
         return
