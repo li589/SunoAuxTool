@@ -187,11 +187,11 @@ class ProceduralGenerator(Generator):
                         )
                 else:
                     # 偶数小节（2/4/6/8）：慢速琶音分解（每拍一个和弦音上行）
+                    # 注：step = bpb/max(4,n) 使末音 t=(n-1)·bpb/max(4,n) < bpb 恒成立，
+                    # 越界 break 在数学上不可达（1.4.8 F2 复核后移除死分支）
                     step = beats_per_bar / max(4, len(tones))
                     for i, tone in enumerate(tones):
                         t = bar_start + i * step
-                        if t >= bar_start + beats_per_bar - 0.01:
-                            break
                         notes.append(
                             Note(
                                 pitch=tone,
@@ -468,9 +468,14 @@ def _parse_pitch_name_to_midi(text: str) -> Optional[int]:
         i += 1
     if i == 0:
         return None
-    name = text[:i].upper()
+    name = text[:i]
     oct_str = text[i:] or ""
+    # 音名查找：先原样，再 capitalize（"Bb"/"bb" -> "Bb"）。
+    # 1.4.8 修复：旧实现 text[:i].upper() 把降号音名 "Bb" 变 "BB"，全表查不到
+    # （docstring 自己的 'Bb2' 示例都返回 None）。
     tone = _PITCH_TONE.get(name)
+    if tone is None:
+        tone = _PITCH_TONE.get(name.capitalize())
     if tone is None:
         return None
     try:
@@ -504,11 +509,11 @@ def _step_toward(current: Optional[int], target: Optional[int], pool: List[int])
 
 
 def _beats_per_bar(time_signature: str) -> float:
-    """按拍号计算每小节拍数（4/4 -> 4.0）。"""
+    """按拍号计算每小节拍数（4/4 -> 4.0）；非法/除零回退 4.0。"""
     try:
         num, den = time_signature.split("/")
         return float(num) * 4.0 / float(den)
-    except (ValueError, AttributeError):
+    except (ValueError, AttributeError, ZeroDivisionError):
         return 4.0
 
 

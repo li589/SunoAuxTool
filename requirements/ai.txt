@@ -85,4 +85,6 @@ py3langid
 #     pip install resampy mir-eval onnxruntime
 #   漏装后端会触发 basic_pitch/__init__.py 的 NameError（if/elif 无 else 分支），
 #   适配器已收口为退出码 6 并提示安装命令。详见 docs/usage.md §2.11。
+# 1.4.8 起上述两步可一键完成：python scripts/setup_basicpitch.py（幂等，
+#   --check 只探测；退出码 0/6 与 AiDependencyError 口径一致）。
 basic-pitch

@@ -17,6 +17,7 @@
 from __future__ import annotations
 
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -101,12 +102,53 @@ def apply_patch(target: Path) -> None:
     log("补丁已应用。")
 
 
+#: B6（1.4.8）：torch>=2.6 起 ``torch.load`` 默认 ``weights_only=True``，
+#: 上游 19 处加载点会全部炸掉——克隆后统一补 ``weights_only=False``。
+_TORCH_LOAD_RE = re.compile(r"torch\.load\(([^)]*)\)")
+
+
+def patch_torch_load(target: Path) -> int:
+    """给上游所有缺 ``weights_only`` 的 ``torch.load(...)`` 单行调用补参数。
+
+    只处理单行调用（跨行调用保守跳过并计数报告）；幂等：已含 weights_only
+    的调用不重复添加。返回本次修改的调用数。
+    """
+    patched = 0
+    skipped_multiline = 0
+    for py in sorted((target / "audiosr").rglob("*.py")):
+        with open(py, encoding="utf-8", newline="") as fh:  # 保留原换行符
+            text = fh.read()
+        if "torch.load(" not in text:
+            continue
+        lines = text.splitlines(keepends=True)
+        changed = False
+        for i, line in enumerate(lines):
+            if "torch.load(" not in line or "weights_only" in line:
+                continue
+            # 跨行调用（括号不平衡）保守跳过，不盲改
+            if line.count("(") != line.count(")"):
+                skipped_multiline += 1
+                continue
+            new = _TORCH_LOAD_RE.sub(lambda m: f"torch.load({m.group(1)}, weights_only=False)", line)
+            if new != line:
+                lines[i] = new
+                changed = True
+                patched += 1
+        if changed:
+            with open(py, "w", encoding="utf-8", newline="") as fh:
+                fh.write("".join(lines))
+    log(f"torch.load weights_only 补丁: 本次修改 {patched} 处"
+        + (f"，跨行调用跳过 {skipped_multiline} 处（需手工确认）" if skipped_multiline else ""))
+    return patched
+
+
 def main() -> None:
     target = resolve_target()
     log(f"目标目录: {target}")
     log(f"上游 @ {PINNED_COMMIT}: {UPSTREAM}")
     clone(target)
     apply_patch(target)
+    patch_torch_load(target)  # B6 预防：torch>=2.6 兼容
     log("权重首次运行自动下载到: ~/.cache/huggingface")
     log("运行依赖见 requirements/vasr.txt")
     log("完成。")

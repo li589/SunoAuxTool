@@ -43,3 +43,7 @@
 #   （《星星泪》5:13 末块 1.2s < 2s 触发；按 plen=min(实际输出长) 夹紧）。
 #   重新克隆上游后运行 scripts/setup_vasr.py 会自动重打此补丁，
 #   长音频末块 <2s 的文件缺此补丁必崩。
+# B6（1.4.8）：setup_vasr.py 克隆后还会给上游全部 torch.load 单行调用自动补
+#   weights_only=False（19 处，实测全为单行；跨行保守跳过）——torch>=2.6 起
+#   weights_only 默认翻转，缺此补丁所有加载点必炸。升级 torch>=2.6 前无需
+#   额外动作（重跑 setup_vasr.py 或对已有树手工补即可）。
