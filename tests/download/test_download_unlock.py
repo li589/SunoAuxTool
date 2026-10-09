@@ -31,7 +31,7 @@ from sunoauxtool.download.unlock import (
 from sunoauxtool.download.unlock import kgm, kwm, qmc
 from sunoauxtool.download.unlock._xutil import sniff_audio_ext, xor_repeating
 
-_ROOT = Path(__file__).resolve().parents[1]
+_ROOT = Path(__file__).resolve().parents[2]
 
 # ---------------------------------------------------------------------------
 # 工具

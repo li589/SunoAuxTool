@@ -260,7 +260,7 @@ def test_ai_adapters_unavailable_in_p0(monkeypatch):
 
 def test_no_torch_import_on_cli(tmp_project):
     """导入 CLI 不触发任何 torch import（T05 验收）。"""
-    src = Path(__file__).resolve().parents[1] / "src"
+    src = Path(__file__).resolve().parents[2] / "src"
     env = {**os.environ, "PYTHONPATH": str(src)}
     code = (
         "import sys; import sunoauxtool.cli; "

@@ -35,7 +35,7 @@ from sunoauxtool.download.ncm.aes_ecb import (
     pkcs7_unpad,
 )
 
-_ROOT = Path(__file__).resolve().parents[1]
+_ROOT = Path(__file__).resolve().parents[2]
 
 # ---------------------------------------------------------------------------
 # AES-128：FIPS-197 官方测试向量

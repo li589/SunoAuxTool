@@ -26,7 +26,7 @@ from sunoauxtool.analysis.tempo import estimate_bpm
 from sunoauxtool.analysis.transcribe import TranscribeOptions, transcribe_wav
 from sunoauxtool.render.fluidsynth import FluidSynthRenderer
 
-ROOT = Path(__file__).resolve().parents[1]
+ROOT = Path(__file__).resolve().parents[2]
 SF2_REL = Path("module/GeneralUser_GS/GeneralUser-GS/GeneralUser-GS.sf2")
 
 # 语料定义：name -> (bpm, 真值音高序列；第 i 个音落在第 i 拍，四分音符断奏)
