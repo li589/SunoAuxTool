@@ -135,3 +135,20 @@ def test_doctor_doctor_still_lists_new_sections(monkeypatch, tmp_path):
     result = _invoke_doctor(monkeypatch, audiosr_dir=tmp_path)
     for name in ("ffmpeg", "ffprobe", "AudioSR", "basic_pitch"):
         assert name in result.output
+
+
+def test_doctor_diffrhythm_source_mode_wording():
+    """1.7.0：doctor 的 diffrhythm 项与源码目录模式口径对齐。
+
+    DiffRhythm 走 DIFFRHYTHM_DIR / module/diffrhythm 源码模式（非 pip 包），
+    不得再输出 find_spec 口径的「未安装」。
+    """
+    from typer.testing import CliRunner
+
+    from sunoauxtool.cli import app
+
+    result = CliRunner().invoke(app, ["doctor"])
+    assert result.exit_code == 0
+    assert "diffrhythm" in result.output
+    assert "源码模式就位" in result.output or "未就位" in result.output
+    assert "diffrhythm  ✅ 已安装" not in result.output

@@ -50,7 +50,7 @@ from sunoauxtool.download.forensics import Verdict, classify, identify
 from sunoauxtool.download.fmp4 import Atom, concatenate_mdat, is_fragmented_mp4, parse_atoms
 from sunoauxtool.download.transcoder import decode_fmp4, find_ffmpeg, probe, remux_opus, to_mp3
 
-__version__ = "1.6.5"
+__version__ = "1.7.0"
 
 __all__ = [
     "Atom",

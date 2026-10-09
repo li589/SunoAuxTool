@@ -277,13 +277,17 @@ set HF_ENDPOINT=https://hf-mirror.com
 **用法示例：**
 ```bash
 # MusicGen：以旋律 WAV 为条件扩编曲（medium fp16 默认；显存不足可 --model-size small）
+# 1.7.0 起聚合入口等价：sunoaux pre musicgen …
 sunoauxtool ai musicgen --input melody.wav --prompt "upbeat pop" --output acc.wav --duration 20 --seed 42
 
 # DiffRhythm：风格提示 → ≥60s 带人声歌曲草稿（chunked=True 默认；草稿不进 Suno 导出链）
+# 1.7.0 起聚合入口等价：sunoaux pre diffrhythm …
 sunoauxtool ai diffrhythm --prompt "slow ballad" --lyrics "第一句词" --duration 95
 ```
 
-详见 [docs/ai-integration.md](docs/ai-integration.md)。
+详见 [docs/ai-integration.md](docs/ai-integration.md)；仓库目录职责与测试分组约定见
+[docs/structure.md](docs/structure.md)；1.7.0 实战验证报告见
+[docs/verification-1.7.0.md](docs/verification-1.7.0.md)。
 
 ---
 

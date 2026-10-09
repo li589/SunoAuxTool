@@ -75,6 +75,14 @@ def test_pre_group_lists_five_commands():
         assert name in _text(result)
 
 
+def test_pre_group_lists_ai_mirrors():
+    """1.7.0：AI 生成命令已镜像到聚合入口（musicgen / diffrhythm）。"""
+    result = runner.invoke(app, ["pre", "--help"])
+    assert result.exit_code == 0
+    for name in ("musicgen", "diffrhythm"):
+        assert name in _text(result)
+
+
 def test_post_group_lists_all_capabilities():
     result = runner.invoke(app, ["post", "--help"])
     assert result.exit_code == 0

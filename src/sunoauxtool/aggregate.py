@@ -74,6 +74,12 @@ pre_app.command("midi", help="(= generate midi) 程序化生成 MIDI")(core_cli.
 pre_app.command("score", help="(= score) 从 MIDI 生成谱面")(core_cli.score_cmd)
 pre_app.command("render", help="(= render) MIDI -> WAV 渲染")(core_cli.render_cmd)
 pre_app.command("transcribe", help="(= transcribe) WAV -> MIDI 转谱")(core_cli.transcribe_cmd)
+pre_app.command("musicgen", help="(= ai musicgen) MusicGen：旋律 WAV -> 伴奏 WAV")(
+    core_cli.ai_musicgen
+)
+pre_app.command("diffrhythm", help="(= ai diffrhythm) DiffRhythm：风格提示 -> 歌曲草稿 WAV")(
+    core_cli.ai_diffrhythm
+)
 
 app.add_typer(pre_app, name="pre")
 

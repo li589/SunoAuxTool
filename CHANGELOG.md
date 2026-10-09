@@ -2,6 +2,32 @@
 
 本项目遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.0.0/) 风格。
 
+## [1.7.0] - 2026-10-09（AI 集成补全 + 功能实战验证 + 目录结构优化）
+
+### 新增
+- **聚合入口 AI 命令镜像**：`sunoaux pre musicgen`（= ai musicgen）与
+  `sunoaux pre diffrhythm`（= ai diffrhythm）——AI 生成能力自此在
+  `sunoaux` 单入口内可达，无需切换全量入口。
+- **docs/structure.md**：仓库结构说明（目录职责、测试分组约定、
+  gitignored 运行区清单）。
+- **docs/verification-1.7.0.md**：功能实战验证报告（doctor 全绿、
+  核心链冒烟、AI 四模块可用性矩阵、解密域验证口径、已知边界）。
+
+### 变更
+- **doctor 的 diffrhythm 口径与源码目录模式对齐**：改用
+  `DiffRhythmAdapter.is_available()` / `repo_dir()` 探测
+  （DIFFRHYTHM_DIR 或 module/diffrhythm），不再误报 pip 包 find_spec
+  的「未安装」；audiocraft 项补充 musicgen 用途提示。
+- **tests/ 目录按域分组重组**（git mv 保历史）：62 个测试文件分入
+  ai/ analysis/ core/ download/ pre/ score/ video/ 七个子目录；
+  test_version_alignment.py 与 conftest.py 留根；CI 命令不变。
+- .gitignore 补 `src/DownloadHelper/`（本地旧包遗留）与 `src/*.egg-info/`。
+
+### 验证
+- doctor 实跑全部正常；核心链冒烟（melody→score→render→tempo
+  119.9/120→transcribe 内置+basic-pitch ONNX→convert-audio→probe）通过；
+  AI 四适配器可用性矩阵全 ✅（详见 docs/verification-1.7.0.md）。
+
 ## [1.6.5] - 2026-10-09（QMC EKey 外部供给：STag/MusicEx 可解密）
 
 ### 新增
