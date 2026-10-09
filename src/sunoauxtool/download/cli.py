@@ -101,8 +101,16 @@ def batch(
     ffmpeg: Optional[str] = typer.Option(None, "--ffmpeg-path", help="ffmpeg 绝对路径"),
     include_ncm: bool = typer.Option(False, "--include-ncm", help="同时解包目录中的 .ncm 文件（1.6.2）"),
     include_unlock: bool = typer.Option(False, "--include-unlock", help="同时解密目录中受支持加密格式（kwm/kgm/vpr/qmc，1.6.3）"),
+    ekey: Optional[str] = typer.Option(None, "--ekey", help="QMC 显式 EKey（base64），STag/MusicEx 无内嵌密钥时用"),
+    ekey_db: Optional[Path] = typer.Option(None, "--ekey-db", help="QMC 客户端密钥库（SQLite，如安卓 player_process_db）"),
+    ekey_api: Optional[str] = typer.Option(None, "--ekey-api", help="QMC 在线 EKey 查询 URL 模板（{id} 占位符）"),
 ) -> None:
     """批量扫描目录：解码所有 fMP4，加密密文跳过并汇总报告。"""
+    import os
+
+    ekey = ekey or os.environ.get("SUNO_QMC_EKEY")
+    ekey_db = ekey_db or os.environ.get("SUNO_QMC_EKEY_DB")
+    ekey_api = ekey_api or os.environ.get("SUNO_QMC_EKEY_API")
     target_out = out or directory
     decoded: list[Path] = []
     skipped: list[str] = []
@@ -127,7 +135,14 @@ def batch(
             try:
                 from sunoauxtool.download.unlock import unlock_file
 
-                unlock_ok.append(unlock_file(file, target_out))
+                unlock_ok.append(
+                    unlock_file(
+                        file, target_out,
+                        ekey=ekey,
+                        ekey_db=str(ekey_db) if ekey_db else None,
+                        ekey_api=ekey_api,
+                    )
+                )
             except SunoError as exc:
                 errors.append(f"{file.name}: {exc.message}")
             except OSError as exc:
@@ -267,9 +282,24 @@ def unlock(
     files: list[Path] = typer.Argument(..., help="输入加密音频文件（ncm/kwm/kgm/vpr/qmc 系列，可多个）"),
     out: Path = typer.Option(Path("."), "-o", "--out", help="输出目录，默认当前目录"),
     overwrite: bool = typer.Option(False, "--overwrite", help="覆盖已存在的输出文件"),
+    ekey: Optional[str] = typer.Option(None, "--ekey", help="QMC 显式 EKey（base64），STag/MusicEx 无内嵌密钥时用"),
+    ekey_db: Optional[Path] = typer.Option(None, "--ekey-db", help="QMC 客户端密钥库（SQLite，如安卓 player_process_db）"),
+    ekey_api: Optional[str] = typer.Option(None, "--ekey-api", help="QMC 在线 EKey 查询 URL 模板（{id} 占位符）"),
+    ekey_timeout: float = typer.Option(10.0, "--ekey-timeout", help="在线 EKey 查询超时秒数"),
 ) -> None:
-    """通用解密（1.6.3）：ncm/kwm/kgm/vpr/qmc 系列加密音频 → 原始音频。"""
+    """通用解密（1.6.3）：ncm/kwm/kgm/vpr/qmc 系列加密音频 → 原始音频。
+
+    QMC STag/MusicEx 文件无内嵌密钥时按序尝试：--ekey 显式 → --ekey-db
+    本地密钥库 → --ekey-api 在线查询；也可用环境变量
+    SUNO_QMC_EKEY / SUNO_QMC_EKEY_DB / SUNO_QMC_EKEY_API 配置缺省值。
+    """
+    import os
+
     from sunoauxtool.download.unlock import unlock_file
+
+    ekey = ekey or os.environ.get("SUNO_QMC_EKEY")
+    ekey_db = ekey_db or os.environ.get("SUNO_QMC_EKEY_DB")
+    ekey_api = ekey_api or os.environ.get("SUNO_QMC_EKEY_API")
 
     if out.exists() and not out.is_dir():
         typer.echo(f"错误: 输出路径不是目录: {out}", err=True)
@@ -277,7 +307,15 @@ def unlock(
     ok: list[Path] = []
     for file in files:
         try:
-            ok.append(unlock_file(file, out, overwrite=overwrite))
+            ok.append(
+                unlock_file(
+                    file, out, overwrite=overwrite,
+                    ekey=ekey,
+                    ekey_db=str(ekey_db) if ekey_db else None,
+                    ekey_api=ekey_api,
+                    ekey_timeout=ekey_timeout,
+                )
+            )
         except SunoError as exc:
             typer.echo(f"错误[{exc.code}]: {exc.message}", err=True)
             raise typer.Exit(code=exc.code or 1) from None

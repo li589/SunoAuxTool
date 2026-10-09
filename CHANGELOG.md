@@ -2,6 +2,30 @@
 
 本项目遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.0.0/) 风格。
 
+## [1.6.5] - 2026-10-09（QMC EKey 外部供给：STag/MusicEx 可解密）
+
+### 新增
+- **QMC EKey 三层供给链**（`unlock/ekey_source.py`，零第三方依赖）：
+  STag / PcV2MusicEx footer 的文件不内嵌密钥，现可经以下任一方式供给
+  （按序尝试，命中即返回）：
+  1. `--ekey <base64>` 显式密钥（单文件手工提供）；
+  2. `--ekey-db <sqlite>` 本地客户端密钥库（安卓 QQ 音乐
+     `player_process_db` 的 `audio_file_ekey_table` 等；对表结构不做
+     硬编码假设——扫描含 ekey 的表，按媒体标识子串匹配行、取疑似
+     base64 密钥列，纯离线）；
+  3. `--ekey-api <url 模板>` 在线查询（`{id}` 占位符替换为媒体标识；
+     响应支持任意层级 JSON 的 ekey 字段或纯文本 base64；不内置任何
+     第三方服务地址）。
+- 环境变量缺省：`SUNO_QMC_EKEY` / `SUNO_QMC_EKEY_DB` / `SUNO_QMC_EKEY_API`；
+  batch `--include-unlock` 与 `sunoaux post unlock` 同步透传。
+- 29 号错误信息升级：给出文件标识与三种供给方式提示。
+- 测试 +17：密钥库命中/未命中/退化全表扫描、在线 JSON/文本/404/网络错误/
+  模板校验、链路优先级、STag 端到端（显式/密钥库/CLI）。
+
+### 修正
+- 测试 fixture 的 STag footer 布局改为官方单一长度字段
+  （`[csv][u32be len][STag]`）；此前重复长度字段只影响 fixture 不影响解析器。
+
 ## [1.6.4] - 2026-10-09（KGM 零公钥化 + KGMA 支持 + KWM 交叉验证）
 
 ### 变更

@@ -13,6 +13,7 @@
 from __future__ import annotations
 
 import base64
+import json
 import struct
 from pathlib import Path
 
@@ -463,11 +464,12 @@ class TestFooter:
 
     def test_stag(self):
         csv = "99999,2,AIM0001"
-        payload = struct.pack(">I", len(csv)) + csv.encode()
-        tail = payload + struct.pack(">I", len(csv)) + b"STag"
+        # 官方 STag 布局：[csv][u32be len][STag]，footer 共 len(csv)+8 字节
+        tail = csv.encode() + struct.pack(">I", len(csv)) + b"STag"
         footer = qmc.parse_footer(tail)
         assert footer is not None and footer.ftype == "STag"
         assert footer.ekey is None and footer.extra["media_mid"] == "AIM0001"
+        assert footer.size == len(csv) + 8
 
     def test_garbage_returns_none(self):
         assert qmc.parse_footer(b"\x00" * 64) is None
@@ -502,8 +504,7 @@ class TestQmcEndToEnd:
 
     def test_stag_needs_online_key(self):
         csv = "1,2,MID"
-        payload = struct.pack(">I", len(csv)) + csv.encode()
-        tail = payload + struct.pack(">I", len(csv)) + b"STag"
+        tail = csv.encode() + struct.pack(">I", len(csv)) + b"STag"
         with pytest.raises(KeyMissingError):
             qmc.decrypt_qmc(b"fLaC" + bytes(128) + tail, ext_hint="qmcflac")
 
@@ -594,3 +595,222 @@ class TestUnlockFile:
         with pytest.raises(DecryptFailedError) as exc_info:
             unlock_file(src, tmp_path / "out")
         assert exc_info.value.code == 28
+
+
+# ---------------------------------------------------------------------------
+# EKey 外部供给（1.6.5）：显式 / 本地密钥库 / 在线查询
+# ---------------------------------------------------------------------------
+
+from sunoauxtool.download.unlock import ekey_source  # noqa: E402
+
+
+class _FakeResp:
+    def __init__(self, body: bytes):
+        self._body = body
+
+    def read(self) -> bytes:
+        return self._body
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *args):
+        return False
+
+
+def _make_stag_file(tmp_path, mid="AIM0001", master=None):
+    """构造 STag footer 的加密 mflac（密钥经 _make_v1_ekey 可还原）。"""
+    master = master or bytes(range(24))
+    ekey = _make_v1_ekey(master)
+    master_full = qmc.ekey_decrypt(ekey.encode("latin-1"))
+    audio = b"fLaC" + bytes(range(256)) * 10
+    enc_audio = qmc.make_qmc2_cipher(master_full).decrypt(audio, 0)  # Map 自逆
+    csv = "99999,2,%s" % mid
+    tail = csv.encode() + struct.pack(">I", len(csv)) + b"STag"
+    src = tmp_path / "song.mflac"
+    src.write_bytes(enc_audio + tail)
+    return src, ekey
+
+
+class TestEkeyDb:
+    def test_hit_by_filepath(self, tmp_path):
+        import sqlite3
+
+        db = tmp_path / "player_process_db"
+        conn = sqlite3.connect(str(db))
+        conn.execute(
+            "CREATE TABLE audio_file_ekey_table (id INTEGER, filepath TEXT, ekey TEXT)"
+        )
+        conn.execute(
+            "INSERT INTO audio_file_ekey_table VALUES (1, '/music/AIM0001.mflac', ?)",
+            ("YWJjZGVmZ2hpamtsbW5v",),
+        )
+        conn.commit()
+        conn.close()
+        hit = ekey_source.find_ekey_in_db(db, ["AIM0001"])
+        assert hit == "YWJjZGVmZ2hpamtsbW5v"
+
+    def test_miss_returns_none(self, tmp_path):
+        import sqlite3
+
+        db = tmp_path / "db.sqlite"
+        conn = sqlite3.connect(str(db))
+        conn.execute("CREATE TABLE t (a TEXT, b TEXT)")
+        conn.execute("INSERT INTO t VALUES ('x', 'y')")
+        conn.commit()
+        conn.close()
+        assert ekey_source.find_ekey_in_db(db, ["NOMATCH"]) is None
+
+    def test_missing_file_raises(self, tmp_path):
+        with pytest.raises(KeyMissingError):
+            ekey_source.find_ekey_in_db(tmp_path / "nope.sqlite", ["MID"])
+
+    def test_fallback_all_tables(self, tmp_path):
+        """无 ekey 命名表时退化为扫描全部表。"""
+        import sqlite3
+
+        db = tmp_path / "db.sqlite"
+        conn = sqlite3.connect(str(db))
+        conn.execute("CREATE TABLE other (path TEXT, key TEXT)")
+        conn.execute(
+            "INSERT INTO other VALUES ('song_MID0022.flac', 'QUJDREVGRw==')"
+        )
+        conn.commit()
+        conn.close()
+        assert ekey_source.find_ekey_in_db(db, ["MID0022"]) == "QUJDREVGRw=="
+
+
+class TestEkeyOnline:
+    def test_json_nested_hit(self, monkeypatch):
+        body = json.dumps({"code": 0, "data": {"ekey": "QUJDREVGRw=="}}).encode()
+
+        def fake_urlopen(req, timeout=None):
+            return _FakeResp(body)
+
+        monkeypatch.setattr(ekey_source.urllib.request, "urlopen", fake_urlopen)
+        hit = ekey_source.fetch_ekey_online("https://x.test/api/{id}", "MID")
+        assert hit == "QUJDREVGRw=="
+
+    def test_plain_text_hit(self, monkeypatch):
+        monkeypatch.setattr(
+            ekey_source.urllib.request, "urlopen",
+            lambda req, timeout=None: _FakeResp(b"QUJDREVGRw==\n"),
+        )
+        assert (
+            ekey_source.fetch_ekey_online("https://x.test/{id}", "MID")
+            == "QUJDREVGRw=="
+        )
+
+    def test_404_returns_none(self, monkeypatch):
+        import urllib.error
+
+        def fake_urlopen(req, timeout=None):
+            raise urllib.error.HTTPError(req.full_url, 404, "nf", {}, None)
+
+        monkeypatch.setattr(ekey_source.urllib.request, "urlopen", fake_urlopen)
+        assert ekey_source.fetch_ekey_online("https://x.test/{id}", "MID") is None
+
+    def test_network_error_raises_29(self, monkeypatch):
+        import urllib.error
+
+        def fake_urlopen(req, timeout=None):
+            raise urllib.error.URLError("conn refused")
+
+        monkeypatch.setattr(ekey_source.urllib.request, "urlopen", fake_urlopen)
+        with pytest.raises(KeyMissingError) as exc_info:
+            ekey_source.fetch_ekey_online("https://x.test/{id}", "MID")
+        assert exc_info.value.code == 29
+
+    def test_missing_placeholder_raises(self):
+        with pytest.raises(KeyMissingError):
+            ekey_source.fetch_ekey_online("https://x.test/api", "MID")
+
+    def test_unparseable_body_returns_none(self, monkeypatch):
+        monkeypatch.setattr(
+            ekey_source.urllib.request, "urlopen",
+            lambda req, timeout=None: _FakeResp(b"!!notbase64!!"),
+        )
+        assert ekey_source.fetch_ekey_online("https://x.test/{id}", "MID") is None
+
+
+class TestEkeyChain:
+    def test_explicit_wins(self):
+        provider = ekey_source.make_ekey_chain(ekey="QUJDREVGRw==")
+        assert provider(["anything"]) == "QUJDREVGRw=="
+
+    def test_chain_order_db_before_api(self, tmp_path, monkeypatch):
+        import sqlite3
+
+        db = tmp_path / "db.sqlite"
+        conn = sqlite3.connect(str(db))
+        conn.execute("CREATE TABLE ekey_t (mid TEXT, k TEXT)")
+        conn.execute("INSERT INTO ekey_t VALUES ('MID', 'REJDRUZH')")
+        conn.commit()
+        conn.close()
+        called = []
+
+        def fake_urlopen(req, timeout=None):
+            called.append(req.full_url)
+            return _FakeResp(b"QUJDREVGRw==")
+
+        monkeypatch.setattr(ekey_source.urllib.request, "urlopen", fake_urlopen)
+        provider = ekey_source.make_ekey_chain(
+            ekey_db=db, ekey_api="https://x.test/{id}"
+        )
+        assert provider(["MID"]) == "REJDRUZH"
+        assert called == []  # 命中密钥库后不触发在线查询
+
+    def test_no_source_returns_none(self):
+        provider = ekey_source.make_ekey_chain()
+        assert provider(["MID"]) is None
+
+
+class TestStagWithEkey:
+    def test_end_to_end_explicit(self, tmp_path):
+        src, ekey = _make_stag_file(tmp_path)
+        provider = ekey_source.make_ekey_chain(ekey=ekey)
+        out, ext = unlock_bytes(src.read_bytes(), "mflac", ekey_provider=provider)
+        assert out == b"fLaC" + bytes(range(256)) * 10 and ext == "flac"
+
+    def test_end_to_end_db(self, tmp_path):
+        import sqlite3
+
+        src, ekey = _make_stag_file(tmp_path)
+        db = tmp_path / "player_process_db"
+        conn = sqlite3.connect(str(db))
+        conn.execute(
+            "CREATE TABLE audio_file_ekey_table (id INTEGER, filepath TEXT, ekey TEXT)"
+        )
+        conn.execute(
+            "INSERT INTO audio_file_ekey_table VALUES (1, '/m/AIM0001.mflac', ?)",
+            (ekey,),
+        )
+        conn.commit()
+        conn.close()
+        provider = ekey_source.make_ekey_chain(ekey_db=db)
+        out, ext = unlock_bytes(src.read_bytes(), "mflac", ekey_provider=provider)
+        assert ext == "flac"
+
+    def test_provider_miss_raises_29(self, tmp_path):
+        src, _ = _make_stag_file(tmp_path)
+        provider = ekey_source.make_ekey_chain()
+        with pytest.raises(KeyMissingError) as exc_info:
+            unlock_bytes(src.read_bytes(), "mflac", ekey_provider=provider)
+        assert exc_info.value.code == 29
+
+    def test_unlock_file_ekey_opt(self, tmp_path):
+        src, ekey = _make_stag_file(tmp_path)
+        out = unlock_file(src, tmp_path / "out", ekey=ekey)
+        assert out.name == "song.flac"
+
+    def test_cli_unlock_ekey(self, tmp_path):
+        from sunoauxtool.download.cli import app
+
+        src, ekey = _make_stag_file(tmp_path)
+        runner = CliRunner()
+        result = runner.invoke(
+            app,
+            ["unlock", str(src), "-o", str(tmp_path / "out"), "--ekey", ekey],
+        )
+        assert result.exit_code == 0, result.output
+        assert (tmp_path / "out" / "song.flac").exists()

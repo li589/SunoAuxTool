@@ -517,11 +517,18 @@ _FALLBACK_EXT = {
 }
 
 
-def decrypt_qmc(data: bytes, ext_hint: str = "", ekey_override: Optional[str] = None) -> tuple[bytes, str]:
+def decrypt_qmc(
+    data: bytes,
+    ext_hint: str = "",
+    ekey_override: Optional[str] = None,
+    ekey_provider=None,
+) -> tuple[bytes, str]:
     """解密 QMC 字节流。返回 (音频字节, 输出扩展名)。
 
     流程：先解析 footer，有内嵌 EKey（或 ekey_override）走 V2；
-    否则尝试 V1 静态密钥；无法识别为音频时按扩展名回退。
+    footer 无密钥时依次尝试 ekey_provider(identifiers)（1.6.5：显式密钥 /
+    本地密钥库 / 在线查询，见 ekey_source）；全部未命中抛 KeyMissingError(29)。
+    无 footer 时走 V1 静态密钥；无法识别为音频时按扩展名回退。
     """
     if len(data) < 16:
         raise DecryptFailedError("文件过短，不是有效的 QMC 文件")
@@ -536,11 +543,19 @@ def decrypt_qmc(data: bytes, ext_hint: str = "", ekey_override: Optional[str] = 
     if footer is not None:
         audio_data = data[: len(data) - footer.size]
         ekey = footer.ekey or ekey_override
+        if ekey is None and ekey_provider is not None:
+            identifiers = [
+                str(v) for v in footer.extra.values() if str(v).strip()
+            ]
+            ekey = ekey_provider(identifiers)
         if ekey is None:
-            # 无内嵌密钥（STag/MusicEx）：无法离线解密
+            # 无内嵌密钥（STag/MusicEx）：需外部供给（显式 --ekey / 本地
+            # 密钥库 --ekey-db / 在线 --ekey-api，见 docs/unlock.md）
             raise KeyMissingError(
-                "该 %s 文件未内嵌解密密钥（%s），需在线获取或用 QQ 音乐"
-                "密钥库提供 EKey 后重试" % (footer.ftype, ext_hint or "qmc")
+                "该 %s 文件未内嵌解密密钥（%s，标识: %s）；请用 --ekey 显式"
+                "提供、--ekey-db 指向客户端密钥库、或 --ekey-api 配置在线查询"
+                % (footer.ftype, ext_hint or "qmc",
+                   ", ".join(str(v) for v in footer.extra.values() if v) or "未知")
             )
         master_key = ekey_decrypt(ekey.encode("latin-1"))
         cipher = make_qmc2_cipher(master_key)

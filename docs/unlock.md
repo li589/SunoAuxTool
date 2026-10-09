@@ -1,4 +1,4 @@
-# unlock — 通用加密音乐解密（1.6.4）
+# unlock — 通用加密音乐解密（1.6.5）
 
 多平台加密音频 → 原始音频。纯标准库、零第三方依赖、纯离线、零外部文件。是 `download/` 域的第三个解密/取回组件（前两个：
 fMP4 转码、NCM 解包）。
@@ -14,8 +14,8 @@ fMP4 转码、NCM 解包）。
 | QQ 音乐（V2 EKey） | `.mflac` `.mgg*` `.mmp4` `.qmc0/2/3/4/6/8` `.qmcflac` `.qmcogg` | 内嵌 EKey → tc_tea 解密 → Map/RC4 流密码 | 无 |
 
 不支持 / 部分支持：
-- QQ 音乐 **STag / PcV2MusicEx** footer 的文件不内嵌 EKey，需在线取密钥
-  （报错码 29 并给出媒体标识提示）。
+- QQ 音乐 **STag / PcV2MusicEx** footer 的文件不内嵌 EKey——1.6.5 起可经
+  外部供给解密（见下节「EKey 外部供给」），未配置时仍报错码 29。
 
 ## CLI
 
@@ -34,8 +34,36 @@ sunoaux post unlock <files> -o output/unlock
 输出命名：`<源文件名主干>.<嗅探到的音频扩展名>`（flac/mp3/ogg/wav/ape…）。
 同名冲突自动追加 ` (1)` 序号，`--overwrite` 强制覆盖。
 
-退出码：27=无法识别的加密格式；28=解密失败/结果不可识别；29=缺少外部
-密钥（仅在线 EKey 场景）。
+退出码：27=无法识别的加密格式；28=解密失败/结果不可识别；29=缺少 EKey
+（未配置任何供给方式或供给链未命中）。
+
+## QMC EKey 外部供给（STag / MusicEx）
+
+STag / PcV2MusicEx footer 的文件（新版客户端下载产物）不含内嵌密钥。
+1.6.5 起按以下顺序供给 EKey（命中即返回）：
+
+1. **显式密钥** `--ekey <base64>`：单文件手工提供；
+2. **本地密钥库** `--ekey-db <sqlite>`：QQ 音乐客户端密钥库，纯离线、
+   最可靠。典型来源：安卓（root/ADB）
+   `/data/data/com.tencent.qqmusic/databases/player_process_db` 的
+   `audio_file_ekey_table`。查找对表结构不做硬编码假设：扫描含 `ekey`
+   的表，按媒体标识（resource_id / media_mid / 文件名）子串匹配行，
+   取疑似 base64 密钥的列；
+3. **在线查询** `--ekey-api <url 模板>`：模板含 `{id}` 占位符（替换为
+   媒体标识）；响应支持任意层级 JSON 的 `ekey` 字段或纯文本 base64。
+   组件**不内置**任何第三方服务地址，自建/可信服务自行指定。
+
+环境变量缺省：`SUNO_QMC_EKEY` / `SUNO_QMC_EKEY_DB` / `SUNO_QMC_EKEY_API`、
+超时 `SUNO_QMC_EKEY_TIMEOUT`（秒，默认 10）。`batch --include-unlock` 与
+`sunoaux post unlock` 同步支持。
+
+```bash
+downloadhelper unlock song.mflac --ekey-db player_process_db -o output/unlock
+downloadhelper unlock song.mflac --ekey-api "https://your.api/ekey/{id}"
+```
+
+Python API：`unlock_bytes(data, ext, ekey_provider=...)` 或
+`unlock_file(path, out_dir, ekey=..., ekey_db=..., ekey_api=...)`。
 
 ## 酷狗公钥（可选加速器）
 

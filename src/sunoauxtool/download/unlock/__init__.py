@@ -3,9 +3,10 @@
 覆盖格式：
 - NCM   网易云（复用 ncm 包：AES-128 + 定制 RC4）
 - KWM   酷我（魔数 yeelion-kuwo，u64 种子 + 32 字节循环密钥异或）
-- KGM/KGE/VPR 酷狗（17 字节私钥 + 272 字节修正表 + 73MB 外置公钥，
-  公钥经 SUNO_KGM_KEY 环境变量或 ~/.cache/sunoauxtool/kugou_key.xz 提供）
-- QMC   QQ 音乐 V1 静态密钥（tkm/bkc*）与 V2 内嵌 EKey（mflac/mgg/qmc*）
+- KGM/KGE/VPR/KGMA 酷狗（17 字节私钥 + 272 字节修正表 + maskV1 掩码流，
+  零外部文件；外部公钥可选作加速器，见 kgm.load_pub_key）
+- QMC   QQ 音乐 V1 静态密钥（tkm/bkc*）与 V2 内嵌 EKey（mflac/mgg/qmc*）；
+  STag/MusicEx 无内嵌密钥的文件经 ekey_source 外部供给（显式/密钥库/在线）
 
 算法移植自 unlock-music（MIT）等公开实现，见 docs/unlock.md 致谢。
 门面：
@@ -64,8 +65,14 @@ def detect_format(ext: str, data: bytes) -> Optional[str]:
     return None
 
 
-def unlock_bytes(data: bytes, ext: str = "") -> tuple[bytes, str]:
-    """解密字节流。返回 (音频字节, 输出扩展名)。"""
+def unlock_bytes(
+    data: bytes, ext: str = "", ekey_provider=None
+) -> tuple[bytes, str]:
+    """解密字节流。返回 (音频字节, 输出扩展名)。
+
+    ekey_provider：可选回调 (identifiers: list[str]) -> Optional[str]，
+    供 QMC STag/MusicEx 等无内嵌密钥的文件外部供给 EKey（见 ekey_source）。
+    """
     fmt = detect_format(ext, data)
     if fmt is None:
         raise UnknownFormatError(
@@ -84,7 +91,9 @@ def unlock_bytes(data: bytes, ext: str = "") -> tuple[bytes, str]:
         out = kgm.decrypt(data, kgma=(fmt == "kgma"))
         return out, _finalize_ext(out, ext)
     # qmc
-    out, out_ext = qmc.decrypt_qmc(data, ext_hint=ext.lower().lstrip("."))
+    out, out_ext = qmc.decrypt_qmc(
+        data, ext_hint=ext.lower().lstrip("."), ekey_provider=ekey_provider
+    )
     return out, out_ext
 
 
@@ -99,13 +108,27 @@ def unlock_file(
     input_path: str | Path,
     output_dir: str | Path,
     overwrite: bool = False,
+    ekey: Optional[str] = None,
+    ekey_db: Optional[str | Path] = None,
+    ekey_api: Optional[str] = None,
+    ekey_timeout: float = 10.0,
 ) -> Path:
-    """解密单个文件并写入 output_dir/<stem>.<ext>。返回输出路径。"""
+    """解密单个文件并写入 output_dir/<stem>.<ext>。返回输出路径。
+
+    EKey 外部供给（QMC STag/MusicEx 无内嵌密钥时生效，按序尝试）：
+    ekey（显式）→ ekey_db（本地 SQLite 密钥库）→ ekey_api（URL 模板，
+    {id} 占位符）。
+    """
+    from sunoauxtool.download.unlock.ekey_source import make_ekey_chain
+
     in_path = Path(input_path)
     out_dir = Path(output_dir)
     data = in_path.read_bytes()
     ext = in_path.suffix.lstrip(".")
-    audio, out_ext = unlock_bytes(data, ext)
+    provider = make_ekey_chain(
+        ekey=ekey, ekey_db=ekey_db, ekey_api=ekey_api, timeout=ekey_timeout
+    )
+    audio, out_ext = unlock_bytes(data, ext, ekey_provider=provider)
     if out_ext == "bin":
         raise DecryptFailedError(
             "解密结果无法识别为音频格式（文件可能已损坏或为不支持的子格式）"
