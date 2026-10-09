@@ -153,19 +153,50 @@ class TestKgm:
         with pytest.raises(UnknownFormatError):
             kgm.decrypt(b"\x00" * 2000, pub_key=b"\x00" * 64)
 
-    def test_key_missing(self, monkeypatch):
+    def test_key_missing_falls_back_to_maskv1(self, monkeypatch):
+        """1.6.4 起 KGM 零依赖：无外置公钥时用内嵌 maskV1 表现算 pub 流。"""
         monkeypatch.setattr(kgm, "locate_pub_key", lambda: None)
-        data = kgm.KGM_MAGIC + b"\x00" * 2000
-        with pytest.raises(KeyMissingError):
-            kgm.decrypt(data)
+        data = bytearray(kgm.KGM_MAGIC + b"\x00" * 1008)
+        data[0x10:0x14] = struct.pack("<I", 1024)
+        data[0x1C:0x2C] = bytes(range(16))
+        audio = b"fLaC" + bytes(range(256)) * 4
+        fake_pub = bytes((i * 7 + 3) & 0xFF for i in range(128))
+        container = bytes(data) + audio
+        # maskV1 路径与「pub 流 = maskV1(k)」朴素实现对拍
+        naive_pub = bytes(kgm.mask_v1(k) for k in range(128))
+        naive_expected = _naive_kgm_decrypt(container, naive_pub, vpr=False)
+        assert kgm.decrypt(container) == naive_expected
+        # 显式传同一 pub 流结果一致（fake 公钥路径与朴素公式对拍）
+        assert kgm.decrypt(container, pub_key=naive_pub) == naive_expected
+        assert kgm.decrypt(container, pub_key=fake_pub) == _naive_kgm_decrypt(
+            container, fake_pub, vpr=False
+        )
 
-    def test_key_length_mismatch(self, tmp_path, monkeypatch):
+    def test_key_length_mismatch_falls_back(self, tmp_path, monkeypatch):
+        """公钥长度不符 → 回退 maskV1，不再报错。"""
         bad = tmp_path / "kugou_key.bin"
         bad.write_bytes(b"\x00" * 100)
         monkeypatch.setattr(kgm, "locate_pub_key", lambda: bad)
-        data = kgm.KGM_MAGIC + b"\x00" * 2000
-        with pytest.raises(KeyMissingError, match="长度不符"):
-            kgm.decrypt(data)
+        data = bytearray(kgm.KGM_MAGIC + b"\x00" * 1008)
+        data[0x10:0x14] = struct.pack("<I", 1024)
+        container = bytes(data) + b"fLaC" + bytes(64)
+        assert kgm.decrypt(container) == kgm.decrypt(
+            container, pub_key=bytes(kgm.mask_v1(k) for k in range(8))
+        )
+
+    def test_mask_v1_matches_official_pubkey(self):
+        """maskV1 流与 ghtz08 官方 73MB 公钥逐字节等价（仅本地存在时抽查）。"""
+        key_p = _ROOT / "output/ref/kugou_key.xz"
+        if not key_p.is_file():
+            pytest.skip("本地无 ghtz08 公钥（output/ref/）")
+        import lzma
+
+        pub = lzma.open(key_p).read()
+        samples = list(range(64)) + [len(pub) - 1] + [
+            (i * 2654435761) % len(pub) for i in range(64)
+        ]
+        for k in samples:
+            assert kgm.mask_v1(k) == pub[k]
 
     def test_locate_env(self, tmp_path, monkeypatch):
         keyfile = tmp_path / "k.xz"
@@ -173,8 +204,16 @@ class TestKgm:
         monkeypatch.setenv("SUNO_KGM_KEY", str(keyfile))
         assert kgm.locate_pub_key() == keyfile
 
-    def test_live_fire_real_vectors(self):
-        """实弹校验：ghtz08 官方加密/解密对 + 真实公钥（仅本地存在时）。"""
+    def test_live_fire_real_vectors_maskv1(self):
+        """实弹（零依赖）：ghtz08 官方加密/解密对，maskV1 路径（本地存在时）。"""
+        enc_p = _ROOT / "output/ref/test_kugou_kgm.dat"
+        right_p = _ROOT / "output/ref/test_kugou_kgm_right.dat"
+        if not (enc_p.is_file() and right_p.is_file()):
+            pytest.skip("本地无 ghtz08 测试向量（output/ref/）")
+        assert kgm.decrypt(enc_p.read_bytes()) == right_p.read_bytes()
+
+    def test_live_fire_real_vectors_pubkey(self):
+        """实弹（公钥加速路径）：同上测试对 + 真实公钥（仅本地存在时）。"""
         enc_p = _ROOT / "output/ref/test_kugou_kgm.dat"
         right_p = _ROOT / "output/ref/test_kugou_kgm_right.dat"
         key_p = _ROOT / "output/ref/kugou_key.xz"
@@ -184,6 +223,40 @@ class TestKgm:
 
         out = kgm.decrypt(enc_p.read_bytes(), pub_key=lzma.open(key_p).read())
         assert out == right_p.read_bytes()
+
+
+# ---------------------------------------------------------------------------
+# KGMA（酷狗新格式，1.6.4）
+# ---------------------------------------------------------------------------
+
+
+class TestKgma:
+    def test_detect_by_ext(self):
+        """KGMA 无固定魔数：按扩展名 + 头部可解析性识别为 kgma。"""
+        enc_p = _ROOT / "output/ref/test_kugou_kgm.dat"
+        if enc_p.is_file():
+            data = enc_p.read_bytes()
+        else:
+            d = bytearray(kgm.KGM_MAGIC + b"\x00" * 1008)
+            d[0x10:0x14] = struct.pack("<I", 1024)
+            data = bytes(d) + bytes(64)
+        assert detect_format("kgma", data) == "kgma"
+
+    def test_plausible_header(self):
+        data = bytearray(kgm.KGM_MAGIC + b"\x00" * 1008)
+        data[0x10:0x14] = struct.pack("<I", 1024)
+        assert kgm.plausible_header(bytes(data) + b"\x00" * 64)
+        data[0x10:0x14] = struct.pack("<I", 0xFFFFFFFF)
+        assert not kgm.plausible_header(bytes(data) + b"\x00" * 64)
+
+    def test_live_fire_kgma_path(self):
+        """KGMA 与 KGM 同算法：ghtz08 向量按 .kgma 分发解密（本地存在时）。"""
+        enc_p = _ROOT / "output/ref/test_kugou_kgm.dat"
+        right_p = _ROOT / "output/ref/test_kugou_kgm_right.dat"
+        if not (enc_p.is_file() and right_p.is_file()):
+            pytest.skip("本地无 ghtz08 测试向量（output/ref/）")
+        audio, ext = unlock_bytes(enc_p.read_bytes(), "kgma")
+        assert audio == right_p.read_bytes() and ext == "mp3"
 
 
 # ---------------------------------------------------------------------------

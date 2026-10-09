@@ -1,15 +1,17 @@
-"""酷狗 KGM/KGE 与 VPR 解密（1.6.3）。零第三方依赖（公钥 xz 解压用标准库 lzma）。
+"""酷狗 KGM/KGE/KGMA 与 VPR 解密（1.6.3 引入，1.6.4 零依赖化）。零第三方依赖。
 
 算法（源自公开的 ghtz08/kugou-kgm-decoder 与 unlock-music 实现，MIT）：
-- 头部 1024 字节：KGM/VPR 魔数（16 字节）+ 偏移 0x10 的 u32 头长度 + 偏移
-  0x1c-0x2c 的 16 字节文件私钥（own key，补 0 成 17 字节）；
+- 头部：偏移 0x10 的 u32 头长度 + 偏移 0x1c-0x2c 的 16 字节文件私钥
+  （own key，补 0 成 17 字节）；KGM/VPR 有各自魔数，KGMA 布局相同
+  （无固定魔数，按扩展名识别）；
 - 音频区每个字节（相对偏移 i）：
       t1 = own[i % 17] ^ enc[i]；t1 = t1 ^ ((t1 & 0x0F) << 4)
       t2 = mend[i % 272] ^ pub[i / 16]；t2 = t2 ^ ((t2 & 0x0F) << 4)
       out[i] = t1 ^ t2
 - VPR 额外与 VprMaskDiff[i % 17] 异或；
-- 公钥约 73,155,904 字节，本包不内置：通过 SUNO_KGM_KEY 环境变量或默认缓存
-  路径提供（.xz 压缩或原始 .bin），缺失时抛 KeyMissingError（退出码 29）。
+- pub 流两种来源（已用 ghtz08 官方密钥逐字节验证等价）：
+  1. **内嵌 maskV1 递归表**（两张 272 项小表，默认；无需任何外部文件）；
+  2. 外置公钥文件（~73MB 预计算流，SUNO_KGM_KEY 提供，作为加速可选项）。
 """
 
 from __future__ import annotations
@@ -20,7 +22,7 @@ from pathlib import Path
 from typing import Optional
 
 from sunoauxtool.download.unlock._xutil import read_u32_le, xor_repeating
-from sunoauxtool.download.unlock.exceptions import KeyMissingError, UnknownFormatError
+from sunoauxtool.download.unlock.exceptions import UnknownFormatError
 
 HEADER_LEN = 1024
 OWN_KEY_LEN = 17
@@ -60,6 +62,40 @@ PUB_KEY_MEND = bytes([
     0xEF, 0x7C, 0xB6, 0xB3, 0x93, 0x50,
 ])
 
+# maskV1 递归掩码的两张 272 项表（unlock-music 社区常量；与 73MB 公钥等价）
+_MASK_TABLE1 = [
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 33, 1, 97, 1, 33, 1, 225, 1,
+    33, 1, 97, 1, 33, 1, 210, 35, 2, 2, 66, 66, 2, 2, 194, 194, 2, 2, 66, 66, 2, 2, 211,
+    211, 2, 3, 99, 67, 99, 3, 227, 195, 227, 3, 99, 67, 99, 3, 148, 180, 148, 101, 4, 4,
+    4, 4, 132, 132, 132, 132, 4, 4, 4, 4, 149, 149, 149, 149, 4, 5, 37, 5, 229, 133,
+    165, 133, 229, 5, 37, 5, 214, 182, 150, 182, 214, 39, 6, 6, 198, 198, 134, 134, 198,
+    198, 6, 6, 215, 215, 151, 151, 215, 215, 6, 7, 231, 199, 231, 135, 231, 199, 231, 7,
+    24, 56, 24, 120, 24, 56, 24, 233, 8, 8, 8, 8, 8, 8, 8, 8, 25, 25, 25, 25, 25, 25,
+    25, 25, 8, 9, 41, 9, 105, 9, 41, 9, 218, 58, 26, 58, 90, 58, 26, 58, 218, 43, 10,
+    10, 74, 74, 10, 10, 219, 219, 27, 27, 91, 91, 27, 27, 219, 219, 10, 11, 107, 75,
+    107, 11, 156, 188, 156, 124, 28, 60, 28, 124, 156, 188, 156, 109, 12, 12, 12, 12,
+    157, 157, 157, 157, 29, 29, 29, 29, 157, 157, 157, 157, 12, 13, 45, 13, 222, 190,
+    158, 190, 222, 62, 30, 62, 222, 190, 158, 190, 222, 47, 14, 14, 223, 223, 159, 159,
+    223, 223, 31, 31, 223, 223, 159, 159, 223, 223, 14, 15, 0, 32, 0, 96, 0, 32, 0, 224,
+    0, 32, 0, 96, 0, 32, 0, 241,
+]
+_MASK_TABLE2 = [
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 35, 1, 103, 1, 35, 1, 239, 1,
+    35, 1, 103, 1, 35, 1, 223, 33, 2, 2, 70, 70, 2, 2, 206, 206, 2, 2, 70, 70, 2, 2,
+    222, 222, 2, 3, 101, 71, 101, 3, 237, 207, 237, 3, 101, 71, 101, 3, 157, 191, 157,
+    99, 4, 4, 4, 4, 140, 140, 140, 140, 4, 4, 4, 4, 156, 156, 156, 156, 4, 5, 39, 5,
+    235, 141, 175, 141, 235, 5, 39, 5, 219, 189, 159, 189, 219, 37, 6, 6, 202, 202, 142,
+    142, 202, 202, 6, 6, 218, 218, 158, 158, 218, 218, 6, 7, 233, 203, 233, 143, 233,
+    203, 233, 7, 25, 59, 25, 127, 25, 59, 25, 231, 8, 8, 8, 8, 8, 8, 8, 8, 24, 24, 24,
+    24, 24, 24, 24, 24, 8, 9, 43, 9, 111, 9, 43, 9, 215, 57, 27, 57, 95, 57, 27, 57,
+    215, 41, 10, 10, 78, 78, 10, 10, 214, 214, 26, 26, 94, 94, 26, 26, 214, 214, 10, 11,
+    109, 79, 109, 11, 149, 183, 149, 123, 29, 63, 29, 123, 149, 183, 149, 107, 12, 12,
+    12, 12, 148, 148, 148, 148, 28, 28, 28, 28, 148, 148, 148, 148, 12, 13, 47, 13, 211,
+    181, 151, 181, 211, 61, 31, 61, 211, 181, 151, 181, 211, 45, 14, 14, 210, 210, 150,
+    150, 210, 210, 30, 30, 210, 210, 150, 150, 210, 210, 14, 15, 0, 34, 0, 102, 0, 34,
+    0, 238, 0, 34, 0, 102, 0, 34, 0, 254,
+]
+
 # 折叠变换 v ^ ((v & 0x0F) << 4) 的 256 项查找表（自逆）
 _FOLD_TABLE = bytes(v ^ ((v & 0x0F) << 4) for v in range(256))
 
@@ -75,7 +111,10 @@ def is_vpr(data: bytes) -> bool:
 
 
 def locate_pub_key() -> Optional[Path]:
-    """按 环境变量 SUNO_KGM_KEY -> 默认缓存路径 的顺序查找公钥文件。"""
+    """按 环境变量 SUNO_KGM_KEY -> 默认缓存路径 的顺序查找公钥文件。
+
+    公钥是可选加速项：没有它也能解密（用内嵌 maskV1 表现算 pub 流）。
+    """
     env = os.environ.get("SUNO_KGM_KEY", "").strip()
     if env:
         p = Path(env)
@@ -91,25 +130,20 @@ def locate_pub_key() -> Optional[Path]:
     return None
 
 
-def load_pub_key(path: Optional[Path] = None) -> bytes:
-    """加载并解压公钥（.xz 用标准库 lzma；.bin 直接读），长度必须精确匹配。"""
+def load_pub_key(path: Optional[Path] = None) -> Optional[bytes]:
+    """加载并解压公钥（.xz 用标准库 lzma；.bin 直接读）。
+
+    找不到或长度不符时返回 None（decrypt 会回退到内嵌 maskV1 表现算）。
+    """
     if path is None:
         path = locate_pub_key()
     if path is None:
-        raise KeyMissingError(
-            "酷狗解密需要外部公钥文件（约 94KB 的 kugou_key.xz，解压后 73MB）。"
-            "请从 ghtz08/kugou-kgm-decoder 仓库 assets 目录下载，"
-            "设置环境变量 SUNO_KGM_KEY 指向该文件，"
-            "或放到 ~/.cache/sunoauxtool/kugou_key.xz"
-        )
+        return None
     raw = path.read_bytes()
     if path.suffix.lower() == ".xz" or raw[:6] == b"\xfd7zXZ\x00":
         raw = lzma.decompress(raw)
     if len(raw) != PUB_KEY_RAW_LEN:
-        raise KeyMissingError(
-            "公钥长度不符：%s 解压后 %d 字节（应为 %d）"
-            % (path, len(raw), PUB_KEY_RAW_LEN)
-        )
+        return None
     return raw
 
 
@@ -123,14 +157,48 @@ def _audio_start(data: bytes) -> int:
     return HEADER_LEN
 
 
-def decrypt(data: bytes, pub_key: Optional[bytes] = None) -> bytes:
-    """解密 KGM/KGE/VPR 字节流。
+def mask_v1(offset: int) -> int:
+    """maskV1 递归掩码（offset 为 16 字节块索引）。
 
-    pub_key 为 73,155,904 字节原始公钥；为 None 时按 locate_pub_key 自动加载。
+    pub_key[k] == mask_v1(k)（已用 ghtz08 官方 73MB 密钥逐字节抽样验证）。
+    """
+    value = 0
+    o = offset
+    while o >= 0x11:
+        value ^= _MASK_TABLE1[o % 272]
+        o >>= 4
+        value ^= _MASK_TABLE2[o % 272]
+        o >>= 4
+    return value
+
+
+def _mask_v1_stream(n_blocks: int) -> bytes:
+    """前 n_blocks 个块索引的 maskV1 流（等价于公钥前 n_blocks 字节）。"""
+    return bytes(mask_v1(k) for k in range(n_blocks))
+
+
+def plausible_header(data: bytes) -> bool:
+    """KGMA 宽松校验（无固定魔数）：头部长度字段可解析且音频区偏移合理。"""
+    if len(data) < 0x2C:
+        return False
+    header_len = read_u32_le(data, 0x10)
+    return 0x40 <= header_len <= len(data)
+
+
+def decrypt(data: bytes, pub_key: Optional[bytes] = None, kgma: bool = False) -> bytes:
+    """解密 KGM/KGE/KGMA/VPR 字节流。
+
+    pub_key 为 73,155,904 字节原始公钥（可选加速项）；为 None 时先按
+    locate_pub_key 自动查找，找不到则用内嵌 maskV1 表现算 pub 流。
+    kgma=True 时跳过 KGM/VPR 魔数校验（KGMA 无固定魔数，由上层按扩展名
+    与 plausible_header 识别）。
     """
     vpr = is_vpr(data)
-    if not vpr and not is_kgm(data):
-        raise UnknownFormatError("不是 KGM/KGE/VPR 文件（魔数不符或文件过短）")
+    if not kgma and not vpr and not is_kgm(data):
+        raise UnknownFormatError("不是 KGM/KGE/KGMA/VPR 文件（魔数不符或文件过短）")
+    if len(data) < 0x2C:
+        raise UnknownFormatError("文件过短，缺少 KGM 头部")
+
     if pub_key is None:
         pub_key = load_pub_key()
 
@@ -144,11 +212,10 @@ def decrypt(data: bytes, pub_key: Optional[bytes] = None) -> bytes:
     # t2 = mend[i % 272] ^ pub[i / 16] -> 折叠
     # 272 = 17*16，mend 的 16 字节块与 i/16 的块边界天然对齐
     n16 = (n + PUB_KEY_MAGNIFICATION - 1) // PUB_KEY_MAGNIFICATION
-    if len(pub_key) < n16:
-        raise KeyMissingError(
-            "公钥过短：需要至少 %d 字节，实际 %d" % (n16, len(pub_key))
-        )
-    pub_slice = pub_key[:n16]
+    if pub_key is not None and len(pub_key) >= n16:
+        pub_slice = pub_key[:n16]
+    else:
+        pub_slice = _mask_v1_stream(n16)
     mend_stream = (PUB_KEY_MEND * (n // len(PUB_KEY_MEND) + 1))[:n]
     pub_bcast = bytearray(n)
     for k in range(n16):

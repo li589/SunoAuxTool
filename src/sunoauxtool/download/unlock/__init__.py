@@ -28,10 +28,11 @@ from sunoauxtool.download.unlock import kgm, kwm, qmc
 # 各家扩展名 -> 格式名
 _KWM_EXTS = frozenset({"kwm"})
 _KGM_EXTS = frozenset({"kgm", "kgm.flac", "kge"})
+_KGMA_EXTS = frozenset({"kgma"})  # KGMA 布局同 KGM 但无固定魔数，按扩展名识别
 _VPR_EXTS = frozenset({"vpr"})
 
 ALL_UNLOCK_EXTS = (
-    qmc.QMC_EXTENSIONS | _KWM_EXTS | _KGM_EXTS | _VPR_EXTS
+    qmc.QMC_EXTENSIONS | _KWM_EXTS | _KGM_EXTS | _KGMA_EXTS | _VPR_EXTS
 )
 
 
@@ -46,6 +47,9 @@ def detect_format(ext: str, data: bytes) -> Optional[str]:
         return "vpr" if kgm.is_vpr(data) else None
     if ext in _KGM_EXTS:
         return "kgm" if kgm.is_kgm(data) else None
+    if ext in _KGMA_EXTS:
+        # KGMA 无固定魔数：头长度/私钥区布局与 KGM 一致，按扩展名 + 头部可解析性识别
+        return "kgma" if kgm.plausible_header(data) else None
     if ext in qmc.QMC_EXTENSIONS:
         return "qmc"
     # 扩展名不可知时按魔数嗅探
@@ -76,8 +80,8 @@ def unlock_bytes(data: bytes, ext: str = "") -> tuple[bytes, str]:
     if fmt == "kwm":
         out = kwm.decrypt(data)
         return out, _finalize_ext(out, ext)
-    if fmt in ("kgm", "vpr"):
-        out = kgm.decrypt(data)
+    if fmt in ("kgm", "vpr", "kgma"):
+        out = kgm.decrypt(data, kgma=(fmt == "kgma"))
         return out, _finalize_ext(out, ext)
     # qmc
     out, out_ext = qmc.decrypt_qmc(data, ext_hint=ext.lower().lstrip("."))

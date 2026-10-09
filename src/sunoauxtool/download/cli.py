@@ -26,7 +26,7 @@ app = typer.Typer(
 
 # batch --include-unlock 扫描的扩展名（ncm 走 --include-ncm 专旗）
 _UNLOCK_BATCH_EXTS = frozenset(
-    {"kwm", "kgm", "kge", "vpr", "tkm"}
+    {"kwm", "kgm", "kge", "kgma", "vpr", "tkm"}
     | {
         "mgg", "mgg0", "mggl", "mgg1", "mflac", "mflac0", "mmp4",
         "qmcflac", "qmcogg", "qmc0", "qmc2", "qmc3", "qmc4", "qmc6", "qmc8",
