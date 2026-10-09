@@ -15,6 +15,8 @@
     15 DSP 处理失败 / 16 DSP 参数错误
     20-24 sunoauxtool.download（猫抓取回转码）
     25 下载源凭证缺失 / 26 下载源请求失败
+    27-29 sunoauxtool.download.unlock（通用解密域）
+    30-34 sunoauxtool.download.suno_dl（Suno 官方下载三段式）
 """
 
 from __future__ import annotations
@@ -51,6 +53,16 @@ ERROR_CODES: List[Tuple[int, str, str]] = [
     # ---- 下载源 API 段 ----
     (25, "下载源凭证缺失", "API 下载源（suno-api/haimeng/tianyin）未配置凭证"),
     (26, "下载源请求失败", "API 下载源网络请求/响应解析失败"),
+    # ---- download.unlock 段（27-29，语义见 download/unlock/exceptions.py）----
+    (27, "无法识别的加密格式", "unlock：魔数/扩展名均不匹配"),
+    (28, "解密失败", "unlock：数据损坏、密钥不匹配或结果非可识别音频"),
+    (29, "缺少外部密钥", "unlock：需外部密钥文件或在线 EKey"),
+    # ---- suno-dl 段（30-34，语义见 download/suno_dl.py）----
+    (30, "suno-dl 凭证缺失", "CDN 快路径失败且无 Cookie 进入载荷/轮询路径（--cookie / SUNO_DL_COOKIE / 配置）"),
+    (31, "suno-dl 请求失败", "HTTP/网络错误（载荷、authorize、轮询、直链取回）"),
+    (32, "suno-dl 响应解析失败", "响应非 JSON 或载荷缺预期字段"),
+    (33, "suno-dl 轮询超时", "download/clip ≤90×2s 或 wav 转换 ≤24×5s 耗尽仍未 ready"),
+    (34, "suno-dl 全部路径失败", "CDN 直拼 / 载荷直链 / 官方轮询三段式均未取得音频"),
 ]
 
 

@@ -2,6 +2,28 @@
 
 本项目遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.0.0/) 风格。
 
+## [1.8.0] - 2026-10-09（suno-dl：Suno 官方明文下载三段式）
+
+### 新增
+- **`sunoaux post suno-dl`**（R8，零解密）：Suno 官方明文下载，三段式路径——
+  ① CDN 直拼 `cdn1.suno.ai/{clip_id}.{ext}`（匿名快路径，参考
+  examples/suno_downloader）；② clip 载荷 `audio_url`/`video_url` 直链（需
+  Cookie）；③ 官方轮询 `download/clip?format=`（≤90×2s → presigned）与
+  wav 专用 `gen wav_file`/`convert_wav`（≤24×5s）。支持 `--fmt mp3|wav|mp4`、
+  `--authorize` 配额门、批量 clip_id（可传 `/song/<uuid>` 链接自动提取）、
+  `--dry-run` 凭证自检（掩码回显）、uniquify 重名追加 `-1/-2`。
+- **download/suno_dl.py**：核心实现（urlopen/sleep 可注入，核心层不依赖 CLI）；
+  Cookie 供给顺序 `--cookie` > `SUNO_DL_COOKIE` > 配置 `[sources.suno] cookie`；
+  文件名清洗复刻扩展口径（非法字符→`-`、空白→`_`、≤200 字符）。
+- **错误码 30-34 段**：30 凭证缺失 / 31 请求失败 / 32 响应解析失败 /
+  33 轮询超时 / 34 全路径失败（`errors` 命令表已登记）。
+- tests/download/test_download_suno_dl.py：20 例（三段式路径切换、wav 专用链、
+  authorize、批量部分失败 8/全失败 9、凭证掩码、CLI uniquify）。
+
+### 设计依据
+- 逆向报告 output/ref/suno_analysis_report.md 第三/四节（2026-10-09）；
+  合规原则延续：不内置第三方中转 API，api_base 仅官方域且可配置。
+
 ## [1.7.0] - 2026-10-09（AI 集成补全 + 功能实战验证 + 目录结构优化）
 
 ### 新增

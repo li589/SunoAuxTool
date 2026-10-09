@@ -1,4 +1,4 @@
-# 仓库结构说明（1.7.0）
+# 仓库结构说明（1.8.0）
 
 ```
 SunoAuxTool/
@@ -6,8 +6,9 @@ SunoAuxTool/
 │   ├── ai/                     # AI 适配器：musicgen / diffrhythm / audiosr / basicpitch
 │   ├── analysis/               # 音频分析：tempo / transcribe / ext（numpy-only）
 │   ├── commands/               # CLI 辅助（helpers）
-│   ├── download/               # 后处理取回域：转码 / NCM / unlock 解密 / 取证
-│   │   └── unlock/             #   通用解密：kwm / kgm / qmc + ekey_source
+│   ├── download/               # 后处理取回域：转码 / NCM / unlock 解密 / 取证 / suno_dl
+│   │   ├── unlock/             #   通用解密：kwm / kgm / qmc + ekey_source
+│   │   └── suno_dl.py          #   Suno 官方明文下载三段式（R8，错误码 30-34）
 │   ├── dsp/                    # DSP 算子（norm / loudnorm / reverb / …）
 │   ├── export/                 # 导出（音频封装 / metadata）
 │   ├── generators/             # 旋律 / MIDI 程序化生成
@@ -44,6 +45,6 @@ SunoAuxTool/
 
 ## 约定
 
-- **聚合入口镜像关系**：`sunoaux pre *` → `sunoauxtool generate/render/score/transcribe/ai musicgen/ai diffrhythm`；`sunoaux post *` → `downloadhelper *` / videomaker / enhance。
+- **聚合入口镜像关系**：`sunoaux pre *` → `sunoauxtool generate/render/score/transcribe/ai musicgen/ai diffrhythm`；`sunoaux post *` → `downloadhelper *` / videomaker / enhance；`post suno-dl` 为聚合入口专属新命令（R8）。
 - **测试放哪**：与被测域同名子目录；跨域守卫（版本对齐）留根；共享夹具只进根 conftest。
 - **gitignored 运行区**：`output/`、`module/`（SF2 走 LFS 除外）、`src/DownloadHelper/`、`src/versatile_audio_super_resolution/`、`*.db`（灵感库运行态）——目录治理时**只补 ignore，不清理内容**。

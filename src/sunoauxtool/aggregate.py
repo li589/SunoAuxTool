@@ -12,6 +12,7 @@
     sunoaux post video render / multi                           （后期：音乐视频）
     sunoaux post dsp        （R6 已交付：DSP 算子链）
     sunoaux post enhance    （AudioSR 音质提升，R5；依赖可选装）
+    sunoaux post suno-dl    （R8 已交付：Suno 官方明文下载三段式）
 
 映射表（新 -> 旧）：
     pre  melody      -> sunoauxtool generate melody
@@ -28,7 +29,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Optional
+from typing import List, Optional
 
 import typer
 
@@ -164,6 +165,85 @@ def fetch_cmd(
     typer.echo(f"✅ 取回 {len(files)} 个文件（source={source}）:")
     for f in files:
         typer.echo(f"   {f.path}")
+
+
+@post_app.command(
+    "suno-dl",
+    help="Suno 官方明文下载（R8 三段式）：CDN 直拼 -> 载荷直链 -> 官方轮询（零解密）",
+)
+@_guard
+def suno_dl_cmd(
+    clips: List[str] = typer.Argument(
+        ..., help="clip_id / 含 /song/<uuid> 的链接，可多个"
+    ),
+    out: Path = typer.Option(Path("suno-dl"), "-o", "--out", help="输出目录"),
+    fmt: str = typer.Option("mp3", "--fmt", help="格式: mp3 | wav | mp4"),
+    cookie: Optional[str] = typer.Option(
+        None, "--cookie", help="会话 Cookie 请求头串（默认读 SUNO_DL_COOKIE 或配置 [sources.suno] cookie）"
+    ),
+    api_base: Optional[str] = typer.Option(
+        None, "--api-base", help="官方 API 基址（默认 Suno 官方域，可被 SUNO_DL_API_BASE 覆盖）"
+    ),
+    authorize: bool = typer.Option(
+        False, "--authorize", help="先调 download/authorize 配额门（涉及 credit 扣减）"
+    ),
+    poll_max: int = typer.Option(90, "--poll-max", help="download/clip 轮询次数上限"),
+    poll_interval: float = typer.Option(2.0, "--poll-interval", help="download/clip 轮询间隔秒"),
+    overwrite: bool = typer.Option(False, "--overwrite", help="覆盖同名输出（默认 uniquify 追加 -1/-2）"),
+    dry_run: bool = typer.Option(
+        False, "--dry-run", help="仅自检 clip_id 形态与凭证掩码，不发请求"
+    ),
+) -> None:
+    """Suno 官方明文下载（R8）：错误码 30 凭证缺失 / 31 请求失败 / 32 响应解析 /
+    33 轮询超时 / 34 全路径失败；批量部分失败沿用 8、全失败 9。"""
+    import os
+
+    from sunoauxtool.download.suno_dl import (
+        DEFAULT_API_BASE,
+        SUPPORTED_FORMATS,
+        SunoDownloader,
+        extract_clip_id,
+        load_cookie_from_config,
+    )
+    from sunoauxtool.exceptions import BatchFailedError, BatchPartialError, ParameterError
+
+    if fmt not in SUPPORTED_FORMATS:
+        raise ParameterError(f"--fmt 只支持 {'|'.join(SUPPORTED_FORMATS)}: {fmt}", code=1)
+
+    resolved_cookie = cookie or os.environ.get("SUNO_DL_COOKIE") or load_cookie_from_config()
+    resolved_base = api_base or os.environ.get("SUNO_DL_API_BASE") or DEFAULT_API_BASE
+    downloader = SunoDownloader(cookie=resolved_cookie, api_base=resolved_base)
+
+    clip_ids = [extract_clip_id(c) for c in clips]
+
+    if dry_run:
+        for cid in clip_ids:
+            typer.echo(f"🔎 {downloader.check(cid)}")
+        return
+
+    succeeded: List[str] = []
+    failed: List[str] = []
+    for cid in clip_ids:
+        try:
+            f = downloader.download(
+                cid, out, fmt=fmt, authorize=authorize,
+                poll_max=poll_max, poll_interval=poll_interval,
+                overwrite=overwrite,
+            )
+            typer.echo(f"✅ {cid}: {f.path}（via={f.meta.get('via')}）")
+            succeeded.append(cid)
+        except Exception as exc:  # noqa: BLE001 - 汇总后统一决定部分/全部失败
+            typer.echo(f"❌ {cid}: {exc}", err=True)
+            failed.append(cid)
+
+    if failed and succeeded:
+        raise BatchPartialError(
+            f"suno-dl 成功 {len(succeeded)} 个、失败 {len(failed)} 个: {', '.join(failed)}", code=8
+        )
+    if failed:
+        raise BatchFailedError(
+            f"suno-dl 全部失败 {len(failed)} 个: {', '.join(failed)}（首个原因见上方 ❌ 行）", code=9
+        )
 
 
 @post_app.command(
