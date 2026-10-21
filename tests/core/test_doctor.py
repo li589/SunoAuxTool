@@ -148,7 +148,11 @@ def test_doctor_diffrhythm_source_mode_wording():
     from sunoauxtool.cli import app
 
     result = CliRunner().invoke(app, ["doctor"])
-    assert result.exit_code == 0
+    # 退出码随环境变化：本地全装（torch 就位）为 0；CI 干净环境无 torch →
+    # doctor 记 1 个 error → Exit(2)，缺 espeak/AudioSR/basic_pitch 时为 1。
+    # 本测试的意图是 diffrhythm 措辞与源码目录模式口径对齐（见 docstring），
+    # 不以退出码判定成败。
+    assert result.exit_code in (0, 1, 2)
     assert "diffrhythm" in result.output
     assert "源码模式就位" in result.output or "未就位" in result.output
     assert "diffrhythm  ✅ 已安装" not in result.output

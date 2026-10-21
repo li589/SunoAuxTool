@@ -7,6 +7,7 @@ WAV 用例手搓 RIFF chunk（复刻 Suno 官方 WAV 结构：fmt + LIST/INFO[IC
 from __future__ import annotations
 
 import os
+import re
 import struct
 import subprocess
 from pathlib import Path
@@ -26,6 +27,11 @@ from sunoauxtool.meta.exceptions import UnsupportedContainerError
 from sunoauxtool.meta.sanitize import _ape_tag_len
 
 runner = CliRunner()
+
+# Linux CI 下 typer 的 OptionHighlighter 给选项名上色时会把 `--mode` 拆成
+# `-` + `-mode` 两段（中间插 ANSI 码），直接子串匹配必败——先剥再断言
+# （与 tests/core/test_aggregate_cli.py 同模式）。
+_ANSI_RE = re.compile(chr(27) + r"\[[0-9;]*m")
 
 
 # ---------------------------------------------------------------------------
@@ -449,8 +455,9 @@ class TestStripMetaCli:
     def test_help_lists_options(self):
         r = runner.invoke(app, ["post", "strip-meta", "--help"])
         assert r.exit_code == 0
+        plain = _ANSI_RE.sub("", r.output)
         for opt in ("--mode", "--title", "--lyrics", "--no-motw", "--dry-run", "--yes"):
-            assert opt in r.output
+            assert opt in plain
 
     def test_dry_run_no_write(self, tmp_path):
         wav = make_suno_like_wav(tmp_path / "Life.wav")

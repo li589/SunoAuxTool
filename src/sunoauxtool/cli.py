@@ -855,29 +855,32 @@ def doctor_cmd(
         # audiocraft（MusicGen 依赖，pip 包）
         ac_ok = importlib.util.find_spec("audiocraft") is not None
         _doctor_item("audiocraft", "✅ 已安装" if ac_ok else "⚠️ 未安装（ai musicgen 需要）")
-        # diffrhythm（源码目录模式：DIFFRHYTHM_DIR 或 module/diffrhythm，
-        # 1.7.0 起与适配器口径对齐——不再查 pip 包 find_spec）
-        try:
-            from sunoauxtool.ai.diffrhythm import DiffRhythmAdapter
-
-            dr_adapter = DiffRhythmAdapter(device="cpu")
-            dr_repo = dr_adapter.repo_dir()
-            dr_ok = bool(dr_adapter.is_available())
-        except Exception:
-            dr_repo, dr_ok = None, False
-        if dr_ok:
-            _doctor_item("diffrhythm", f"✅ 源码模式就位 ({dr_repo})")
-        else:
-            _doctor_item(
-                "diffrhythm",
-                "⚠️ 未就位（ai diffrhythm 需要：设 DIFFRHYTHM_DIR 或 clone 到"
-                " module/diffrhythm，权重约 7.5GB；不影响核心管线）",
-            )
-            warnings += 1
     else:
         _doctor_item("AI 依赖", "❌ torch 未安装")
         typer.echo("     → 安装: pip install torch --index-url https://download.pytorch.org/whl/cu121")
         errors += 1
+
+    # diffrhythm（源码目录模式：DIFFRHYTHM_DIR 或 module/diffrhythm，
+    # 1.7.0 起与适配器口径对齐——不再查 pip 包 find_spec。
+    # 刻意置于 torch 分支之外：源码模式探测不依赖 torch，无 torch 环境
+    # （如 CI）也应报告本项，否则口径不可见）
+    try:
+        from sunoauxtool.ai.diffrhythm import DiffRhythmAdapter
+
+        dr_adapter = DiffRhythmAdapter(device="cpu")
+        dr_repo = dr_adapter.repo_dir()
+        dr_ok = bool(dr_adapter.is_available())
+    except Exception:
+        dr_repo, dr_ok = None, False
+    if dr_ok:
+        _doctor_item("diffrhythm", f"✅ 源码模式就位 ({dr_repo})")
+    else:
+        _doctor_item(
+            "diffrhythm",
+            "⚠️ 未就位（ai diffrhythm 需要：设 DIFFRHYTHM_DIR 或 clone 到"
+            " module/diffrhythm，权重约 7.5GB；不影响核心管线）",
+        )
+        warnings += 1
 
     # espeak-ng
     espeak = shutil.which("espeak-ng")

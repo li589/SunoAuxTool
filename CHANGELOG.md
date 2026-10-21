@@ -44,6 +44,16 @@
 - 根套件 1653 例全绿（+5 跳过：沙箱 ADS 删除拦截、AI 依赖缺位），
   覆盖率 89.94%（门槛 87%），落盘 output/ref/pytest_190.txt。
 
+### 修复（CI 红线，v1.7.0 起存量）
+- doctor 的 diffrhythm 项原先置于 `if torch_ok:` 分支内——CI 干净环境无 torch
+  时该项根本不输出，`test_doctor_diffrhythm_source_mode_wording` 自 1.7.0 起
+  在 CI 恒红。已将源码模式探测移出 torch 分支（探测本就不依赖 torch），
+  无 torch 环境也报告口径；该测试退出码断言放宽为环境相关值（0/1/2）。
+- `TestStripMetaCli.test_help_lists_options`：Linux CI 下 typer 的
+  OptionHighlighter 会把 `--mode` 拆成 `-`+`-mode` 两段上色（中间插 ANSI 码），
+  子串匹配必败——按项目既有模式（test_aggregate_cli.py）先剥 ANSI 再断言。
+- 本地以 `GITHUB_ACTIONS=true TERM=xterm` 模拟 CI 终端特性复跑全量验证通过。
+
 ## [1.8.0] - 2026-10-09（suno-dl：Suno 官方明文下载三段式）
 
 ### 新增
