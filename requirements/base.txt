@@ -7,6 +7,8 @@ midi2audio==0.1.1
 soundfile==0.14.0
 numpy==2.5.1
 tomli-w==1.2.0
+mutagen==1.47.0
+cryptography==50.0.2
 
 # 可选：MP3 导出（export --format mp3 / export suno --format mp3 时需安装）
 lameenc==1.8.4

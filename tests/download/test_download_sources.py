@@ -34,7 +34,7 @@ runner = CliRunner()
 
 def test_source_registry():
     names = {s.name for s in list_sources()}
-    assert names == {"catcatch", "suno-api", "haimeng", "tianyin"}
+    assert names == {"catcatch", "suno-api", "haimeng", "tianyin", "usesuno"}
 
 
 def test_api_source_unknown_name_rejected():

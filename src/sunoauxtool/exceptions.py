@@ -17,6 +17,7 @@
     25 下载源凭证缺失 / 26 下载源请求失败
     27-29 sunoauxtool.download.unlock（通用解密域）
     30-34 sunoauxtool.download.suno_dl（Suno 官方下载三段式）
+    35-36 sunoauxtool.meta（元数据清除/保留/覆写）
 """
 
 from __future__ import annotations
@@ -63,6 +64,9 @@ ERROR_CODES: List[Tuple[int, str, str]] = [
     (32, "suno-dl 响应解析失败", "响应非 JSON 或载荷缺预期字段"),
     (33, "suno-dl 轮询超时", "download/clip ≤90×2s 或 wav 转换 ≤24×5s 耗尽仍未 ready"),
     (34, "suno-dl 全部路径失败", "CDN 直拼 / 载荷直链 / 官方轮询三段式均未取得音频"),
+    # ---- sunoauxtool.meta 段（35-36，语义见 meta/exceptions.py）----
+    (35, "容器不支持或不可解析", "meta：扩展名不在 wav/mp3/flac/m4a/ogg/opus 内，或结构损坏"),
+    (36, "标签读写失败", "meta：mutagen 保存失败、WAV 重写失败、尾部 legacy 标签剥除失败"),
 ]
 
 

@@ -34,8 +34,16 @@ CONFIG_CANDIDATES = [
 _TIMEOUT_S = 30.0
 
 
-def load_source_config(name: str) -> Dict[str, str]:
-    """读取指定源的配置节；缺失抛 SourceCredentialError(25)。"""
+def load_source_config(
+    name: str, require_endpoint: bool = True, missing_ok: bool = False
+) -> Dict[str, str]:
+    """读取指定源的配置节；缺失抛 SourceCredentialError(25)。
+
+    ``require_endpoint=False`` 用于端点写死在代码里的源（如 usesuno，
+    其 rights/CDN 端点是公开契约常量，配置只需 token）。
+    ``missing_ok=True`` 用于凭证可经 CLI/环境变量提供的源（如 usesuno 的
+    token），无配置节时返回空 dict 而非报错。
+    """
     import tomllib
 
     merged: Dict[str, str] = {}
@@ -50,13 +58,15 @@ def load_source_config(name: str) -> Dict[str, str]:
         merged.update({str(k): str(v) for k, v in section.items()})
 
     if not merged:
+        if missing_ok:
+            return {}
         hint = ", ".join(str(p) for p in CONFIG_CANDIDATES)
         msg = f"下载源 {name!r} 未配置（{'找到配置文件' if found_any else '配置文件不存在'}: {hint}）"
         raise SourceCredentialError(
             f"{msg}。请在配置中添加:\n[sources.{name}]\nendpoint = \"https://...\"\ntoken = \"...\"",
             code=25,
         )
-    if not merged.get("endpoint"):
+    if require_endpoint and not merged.get("endpoint"):
         raise SourceCredentialError(
             f"下载源 {name!r} 配置缺少 endpoint（令牌可缺省，端点必填）", code=25
         )

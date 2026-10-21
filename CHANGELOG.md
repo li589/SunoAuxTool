@@ -2,6 +2,48 @@
 
 本项目遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.0.0/) 风格。
 
+## [1.9.0] - 2026-10-21（R9：Suno 痕迹清除 meta 子包 + usesuno 解析端口）
+
+### 新增
+- **`sunoaux post strip-meta`**（R9 功能 A）：移除 Suno 痕迹的三档模式——
+  ① `--mode all` 移除所有标签信息并解除 MOTW（Zone.Identifier）计算机保护；
+  ② `--mode keep-basic` 仅保留曲名/作者/专辑/年份/流派/歌词/评论，其余全剥
+  （含 ID3 封面、Suno 溯源串、TXXX）；③ `--mode custom` 覆写自定义信息
+  （`--title/--artist/--album/--genre/--year/--lyrics/--comment`）。
+  支持 wav/mp3/flac/m4a/ogg/opus；`--dry-run` 预演、`--no-motw` 跳过 MOTW。
+- **meta/sanitize.py**：容器分派实现。WAV 走自写 chunk 重写器（白名单
+  fmt/data/fact，LIST/INFO、C2PA、id3 等任意块一律剔除后按需重建）；
+  MP3/FLAC/M4A/OGG/Opus 走 mutagen + 尾部 ID3v1/APEv2 手工剥离；
+  FLAC 图片块剔除。WAV 的 INFO 保留集刻意不含 ICMT/ISFT（Suno 溯源串惯常位）。
+- **`post fetch --source usesuno`**（R9 功能 B）：usesuno.com 下载器契约完整
+  还原（examples/usesuno 保存页逆向）——`POST /api/rights`（Turnstile 人验
+  Bearer token，前端 `usesuno-access-v2`）→ key/iv AES-GCM 解包
+  （userKey=SHA-256(glt)，AAD=content_id）→ cloudfront 密文取回 →
+  AES-CTR 解密（**无整流**，与官方播放链同构）→ 落盘 `{clip_id}.m4a`。
+  token 三来源：`--token` > `USESUNO_TOKEN` > 配置节 `[usesuno]`。
+- **错误码 35-36 段**：35 容器不支持/不可解析；36 标签读写失败。
+- tests/meta/test_meta_sanitize.py（35 例 + 1 运行时 skip）与
+  tests/download/test_download_sources_usesuno.py（13 例，密码学零 mock、
+  仅 HTTP 注入的真实 AES-GCM/AES-CTR 往返）。
+- 依赖新增 mutagen==1.47.0（标签读写）、cryptography>=41.0（AES-GCM/CTR；
+  实际锁定 50.0.2，requirements/base.txt 同步）。
+
+### 设计依据与边界
+- 逆向报告 output/ref/suno_analysis_report.md 新增第五节「examples 四源解析
+  端口分析」：usesuno=已接入（唯一可完整实现者）；unlock music hi=不接入
+  （无 Suno 支持面 + um-api.ixarea.com 后端 HTTP 000 死亡）；
+  DLBunny=不接入（Next.js RSC 流式端点未静态暴露 + hCaptcha 门）；
+  suno_downloader=已集成于 1.8.0（CDN 直拼段）。
+- 诚实边界（docstring 明示）：C2PA 硬绑定哈希随块移除失效（soft-binding
+  水印不在标签层，strip-meta 不承诺）；MOTW 仅 Windows NTFS；
+  usesuno token 不可自动化签发，须用户自备。
+- 合规原则延续：不内置第三方 API 地址；usesuno 端点/协议头为逆向还原的
+  客户端常量，token 由用户自供。
+
+### 测试
+- 根套件 1653 例全绿（+5 跳过：沙箱 ADS 删除拦截、AI 依赖缺位），
+  覆盖率 89.94%（门槛 87%），落盘 output/ref/pytest_190.txt。
+
 ## [1.8.0] - 2026-10-09（suno-dl：Suno 官方明文下载三段式）
 
 ### 新增

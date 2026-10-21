@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "sunoauxtool"
-version = "1.8.0"
+version = "1.9.0"
 description = "SunoAuxTool：Suno/海绵音乐/网易天音等 AI 音乐工具的前期+后期处理工具箱（生成/谱面/互转 + 下载/转码/DSP/视频/音质增强）"
 readme = "README.md"
 requires-python = ">=3.12"
@@ -31,6 +31,8 @@ dependencies = [
     "scipy==1.18.0",  # R6 DSP：resample_poly + EBU R128 K 加权（loudness.py）
     "tomli-w==1.2.0",
     "pillow>=10.0.0",
+    "mutagen==1.47.0",  # R9 meta：标签清除/保留/覆写（WAV 走自写 chunk 重写器）
+    "cryptography>=41.0",  # R9 usesuno 源：AES-GCM 密钥解包 + AES-CTR 音频解密
 ]
 
 [project.urls]

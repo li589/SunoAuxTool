@@ -13,6 +13,7 @@
     sunoaux post dsp        （R6 已交付：DSP 算子链）
     sunoaux post enhance    （AudioSR 音质提升，R5；依赖可选装）
     sunoaux post suno-dl    （R8 已交付：Suno 官方明文下载三段式）
+    sunoaux post strip-meta （R9 已交付：移除 Suno 痕迹——标签清除/保留/覆写 + MOTW）
 
 映射表（新 -> 旧）：
     pre  melody      -> sunoauxtool generate melody
@@ -111,18 +112,24 @@ post_app.command("unlock", help="(= downloadhelper unlock) 通用解密：ncm/kw
 )
 @post_app.command(
     "fetch",
-    help="取回音频（R7）：catcatch=猫抓缓存扫描转码（默认）；suno-api/haimeng/tianyin=API 源",
+    help="取回音频（R7）：catcatch=猫抓缓存扫描转码（默认）；suno-api/haimeng/tianyin=API 源；"
+         "usesuno=usesuno.com 转播源（SW-Mango 密文，需自备人验 token）",
 )
 @_guard
 def fetch_cmd(
-    query: str = typer.Argument(..., help="catcatch=缓存目录；API 源=歌曲/任务 ID"),
+    query: str = typer.Argument(..., help="catcatch=缓存目录；API 源=歌曲/任务 ID；usesuno=clip_id 或 /song/<uuid> 链接"),
     source: str = typer.Option(
-        "catcatch", "--source", "-s", help="源：catcatch | suno-api | haimeng | tianyin"
+        "catcatch", "--source", "-s", help="源：catcatch | suno-api | haimeng | tianyin | usesuno"
     ),
     out: Path = typer.Option(None, "-o", "--out", help="输出目录（catcatch 默认原目录；API 默认 ./fetched/<source>）"),
     fmt: str = typer.Option("both", "--fmt", help="[catcatch] 输出格式: opus | mp3 | both"),
     bitrate: str = typer.Option("192k", "--bitrate", help="[catcatch] MP3 码率"),
     ffmpeg: Optional[str] = typer.Option(None, "--ffmpeg-path", help="[catcatch] ffmpeg 绝对路径"),
+    token: Optional[str] = typer.Option(
+        None,
+        "--token",
+        help="[usesuno] Bearer 会话令牌（默认读 USESUNO_TOKEN 或配置 [sources.usesuno] token）",
+    ),
     dry_run: bool = typer.Option(
         False, "--dry-run", help="[R11] 仅校验凭证/可用性：不实际取回；缺凭证报 25"
     ),
@@ -130,12 +137,16 @@ def fetch_cmd(
     """统一取回入口（R7）：错误码 25=凭证缺失、26=请求失败；猫抓沿用 20-24。"""
     if dry_run:
         from sunoauxtool.download.sources.base import list_sources
+        from sunoauxtool.download.sources.usesuno import UseSunoSource
 
         valid = {s.name: s for s in list_sources()}
         if source not in valid:
             known = ", ".join(sorted(valid))
             raise ParameterError(f"未知下载源: {source}（可用: {known}）", code=1)
-        typer.echo(f"🔎 dry-run（不取回）: {valid[source].check(query)}")
+        adapter = valid[source]
+        if isinstance(adapter, UseSunoSource) and token:
+            adapter = UseSunoSource(token=token)
+        typer.echo(f"🔎 dry-run（不取回）: {adapter.check(query)}")
         return
 
     if source == "catcatch":
@@ -151,6 +162,7 @@ def fetch_cmd(
 
     from sunoauxtool.download.sources.base import list_sources
     from sunoauxtool.download.sources.catcatch import CatCatchSource
+    from sunoauxtool.download.sources.usesuno import UseSunoSource
 
     valid = {s.name: s for s in list_sources()}
     if source not in valid:
@@ -160,6 +172,8 @@ def fetch_cmd(
     adapter = valid[source]
     if isinstance(adapter, CatCatchSource):
         adapter.fmt, adapter.bitrate, adapter.ffmpeg = fmt, bitrate, ffmpeg
+    elif isinstance(adapter, UseSunoSource) and token:
+        adapter = UseSunoSource(token=token)
     target_out = out or Path("fetched") / source
     files = adapter.fetch(query, target_out)
     typer.echo(f"✅ 取回 {len(files)} 个文件（source={source}）:")
@@ -243,6 +257,103 @@ def suno_dl_cmd(
     if failed:
         raise BatchFailedError(
             f"suno-dl 全部失败 {len(failed)} 个: {', '.join(failed)}（首个原因见上方 ❌ 行）", code=9
+        )
+
+
+@post_app.command(
+    "strip-meta",
+    help="移除 Suno 痕迹（R9）：all=移除全部标签/溯源并解除计算机保护 | "
+         "keep-basic=只保留曲名/作者/歌词等 | custom=覆写自定义信息（原地）",
+)
+@_guard
+def strip_meta_cmd(
+    files: List[str] = typer.Argument(
+        ..., help="音频文件（wav/mp3/flac/m4a/ogg/opus），可多个"
+    ),
+    mode: str = typer.Option("all", "--mode", help="all | keep-basic | custom"),
+    title: Optional[str] = typer.Option(None, "--title", help="[custom] 曲名"),
+    artist: Optional[str] = typer.Option(None, "--artist", help="[custom] 作者"),
+    album: Optional[str] = typer.Option(None, "--album", help="[custom] 专辑"),
+    genre: Optional[str] = typer.Option(None, "--genre", help="[custom] 流派"),
+    year: Optional[str] = typer.Option(None, "--year", help="[custom] 年份"),
+    lyrics: Optional[str] = typer.Option(None, "--lyrics", help="[custom] 歌词"),
+    comment: Optional[str] = typer.Option(None, "--comment", help="[custom] 评论"),
+    no_motw: bool = typer.Option(
+        False, "--no-motw", help="不解除 Windows 计算机保护（zone.Identifier）"
+    ),
+    dry_run: bool = typer.Option(
+        False, "--dry-run", help="仅列出将移除/保留/覆写的内容，不写文件"
+    ),
+    yes: bool = typer.Option(False, "--yes", "-y", help="跳过原地覆写确认提示"),
+) -> None:
+    """移除音频元数据/溯源（R9）：错误码 35=容器不支持 / 36=标签读写失败；
+    批量部分失败 8、全失败 9。注意：C2PA 音频域水印（soft binding）不在标签层，
+    本功能不移除；硬绑定随 manifest 删除而失效。"""
+    from sunoauxtool.exceptions import BatchFailedError, BatchPartialError
+    from sunoauxtool.meta import MODES, SanitizeSpec, sanitize_file
+
+    if mode not in MODES:
+        raise ParameterError(f"--mode 只支持 {'|'.join(MODES)}: {mode}", code=1)
+
+    paths = [Path(f) for f in files]
+    missing = [str(p) for p in paths if not p.is_file()]
+    if missing:
+        raise InputFileError(f"文件不存在: {', '.join(missing)}", code=3)
+
+    spec = SanitizeSpec(
+        mode=mode,
+        title=title,
+        artist=artist,
+        album=album,
+        genre=genre,
+        year=year,
+        lyrics=lyrics,
+        comment=comment,
+        motw=not no_motw,
+    )
+
+    if dry_run:
+        for p in paths:
+            rep = sanitize_file(p, spec, dry_run=True)
+            typer.echo(f"🔎 {p.name} [{rep.container}] {rep.summary()}")
+        return
+
+    if not yes:
+        proceed = typer.confirm(
+            f"⚠️ 将【原地覆写】{len(paths)} 个文件（元数据不可恢复），确认继续？",
+            default=False,
+        )
+        if not proceed:
+            typer.echo("已取消，未修改任何文件。")
+            raise typer.Exit(0)
+
+    succeeded: List[str] = []
+    failed: List[str] = []
+    errors: List[Exception] = []
+    for p in paths:
+        try:
+            rep = sanitize_file(p, spec)
+            typer.echo(f"✅ {p.name} [{rep.container}] {rep.summary()}")
+            succeeded.append(str(p))
+        except Exception as exc:  # noqa: BLE001 - 汇总后统一决定部分/全部失败
+            typer.echo(f"❌ {p.name}: {exc}", err=True)
+            failed.append(str(p))
+            errors.append(exc)
+
+    if failed and len(paths) == 1:
+        # 单文件：透传原始错误码（35/36 等），比笼统的 9 更可操作
+        raise errors[0]
+    if failed and succeeded:
+        raise BatchPartialError(
+            f"strip-meta 成功 {len(succeeded)} 个、失败 {len(failed)} 个: "
+            f"{', '.join(Path(f).name for f in failed)}",
+            code=8,
+        )
+    if failed:
+        raise BatchFailedError(
+            f"strip-meta 全部失败 {len(failed)} 个: "
+            f"{', '.join(Path(f).name for f in failed)}（首个原因见上方 ❌ 行）",
+            code=9,
         )
 
 
