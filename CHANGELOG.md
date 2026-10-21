@@ -2,6 +2,21 @@
 
 本项目遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.0.0/) 风格。
 
+## [1.9.1] - 2026-10-21（修复：doctor diffrhythm 口径 + CLI help ANSI 断言）
+
+### 修复
+- **doctor diffrhythm 项移出 torch 分支**（`src/sunoauxtool/cli.py`）：源码目录模式探测
+  不依赖 torch，原先置于 `if torch_ok:` 内导致无 torch 环境（CI 干净环境）根本不输出
+  该项——`test_doctor_diffrhythm_source_mode_wording` 自 1.7.0 起在 CI 恒红
+  （`assert 2 == 0`）。现已无条件报告 diffrhythm 源码模式口径；该测试退出码断言
+  放宽为环境相关值（0/1/2），测试意图回归措辞本身。
+- **`TestStripMetaCli.test_help_lists_options` 剥 ANSI 后再断言**：Linux CI 下 typer 的
+  OptionHighlighter 会把 `--mode` 拆成 `-`+`-mode` 两段分别上色（中间插 ANSI 码），
+  裸子串匹配必败。按项目既有模式（`tests/core/test_aggregate_cli.py`）先剥再断言。
+- 本地以 `GITHUB_ACTIONS=true TERM=xterm` 模拟 CI 终端特性（typer `rich_utils` 据此
+  `force_terminal` 开色）复跑全量：1653 passed + 5 skipped，CI 实跑转绿
+  （v1.7.0/v1.8.0/v1.9.0 的 CI 红灯至此清除）。
+
 ## [1.9.0] - 2026-10-21（R9：Suno 痕迹清除 meta 子包 + usesuno 解析端口）
 
 ### 新增
