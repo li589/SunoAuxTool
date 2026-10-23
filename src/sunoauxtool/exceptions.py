@@ -18,6 +18,12 @@
     27-29 sunoauxtool.download.unlock（通用解密域）
     30-34 sunoauxtool.download.suno_dl（Suno 官方下载三段式）
     35-36 sunoauxtool.meta（元数据清除/保留/覆写）
+    40 sunoauxtool.compose（清单语义/编曲非法）
+    41 音源缺失或校验失败（预留 2.1）
+    42 渲染后端不可用（预留 2.0 PR-E）
+    43 分轨或混音失败（预留 2.0 PR-E）
+    44 sunoauxtool.compose（清单结构/schema 非法）
+    45 sunoauxtool.midi（MIDI 通道资源不足）
 """
 
 from __future__ import annotations
@@ -69,6 +75,9 @@ ERROR_CODES: List[Tuple[int, str, str]] = [
     (36, "标签读写失败", "meta：mutagen 保存失败、WAV 重写失败、尾部 legacy 标签剥除失败"),
     # ---- sunoauxtool.midi 段（45，2.0 PR-A；40-44 留给 compose）----
     (45, "MIDI 通道不足", "midi：鼓轨冲突或旋律轨超过 15 条（通道 9 保留给鼓）"),
+    # ---- sunoauxtool.compose 段（40 / 44，2.0 PR-C）----
+    (40, "编曲清单非法", "compose：语义错误（小节数/段落衔接/音域/通道/音符越界），带 JSON Pointer"),
+    (44, "清单 schema 校验失败", "compose：结构错误（缺字段/类型不符/未知字段/TOML 语法）"),
 ]
 
 

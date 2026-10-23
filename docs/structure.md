@@ -11,7 +11,7 @@ SunoAuxTool/
 │   │   ├── unlock/             #   通用解密：kwm / kgm / qmc + ekey_source
 │   │   └── suno_dl.py          #   Suno 官方明文下载三段式（R8，错误码 30-34）
 │   ├── dsp/                    # DSP 算子（norm / loudnorm / reverb / …）
-│   ├── compose/                # 编曲域（2.0 PR-B）：Song/Section/Track/Clip/MixStrip + 旧模型适配器
+│   ├── compose/                # 编曲域（2.0 PR-B/C）：song/spec/api/cli + 旧模型适配器
 │   ├── export/                 # 导出（音频封装 / metadata）
 │   ├── generators/             # 旋律 / MIDI 程序化生成
 │   ├── meta/                   # 标签清洗子包（R9）：sanitize + 专属异常（错误码 35-36）
@@ -26,7 +26,7 @@ SunoAuxTool/
 ├── tests/                      # pytest（[tool.pytest] testpaths=tests，按域分组）
 │   ├── ai/                     #   AI 适配器
 │   ├── analysis/               #   音频分析 + CLI
-│   ├── compose/                #   2.0 PR-B 编曲模型（song / adapters）
+│   ├── compose/                #   2.0 PR-B/C 编曲域（song / spec / api / cli）
 │   ├── core/                   #   主 CLI / pipeline / dsp / doctor / 发布守卫等
 │   ├── download/               #   后处理域（含 unlock 全套 + usesuno 源）
 │   ├── meta/                   #   R9 标签清洗（sanitize 全模式）
@@ -52,7 +52,7 @@ SunoAuxTool/
 
 ## 约定
 
-- **聚合入口镜像关系**：`sunoaux pre *` → `sunoauxtool generate/render/score/transcribe/ai musicgen/ai diffrhythm`；`sunoaux post *` → `downloadhelper *` / videomaker / enhance；`post suno-dl` 为聚合入口专属新命令（R8）；`post strip-meta`（R9）同为聚合入口专属。
+- **聚合入口镜像关系**：`sunoaux pre *` → `sunoauxtool generate/render/score/transcribe/ai musicgen/ai diffrhythm`；`sunoaux post *` → `downloadhelper *` / videomaker / enhance；`post suno-dl` 为聚合入口专属新命令（R8）；`post strip-meta`（R9）同为聚合入口专属；`sunoaux compose *` → `sunoauxtool compose *`（2.0 PR-C，编曲域）。
 - **R9 新增依赖**：mutagen（标签读写；WAV 走自写 chunk 重写器不用 mutagen 容器）、cryptography（AES-GCM 密钥解包 + AES-CTR 音频解密，usesuno 源）。
 - **测试放哪**：与被测域同名子目录；跨域守卫（版本对齐）留根；共享夹具只进根 conftest。
 - **gitignored 运行区**：`output/`、`module/`（SF2 走 LFS 除外）、`src/DownloadHelper/`、`src/versatile_audio_super_resolution/`、`*.db`（灵感库运行态）——目录治理时**只补 ignore，不清理内容**。

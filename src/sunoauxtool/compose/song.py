@@ -609,17 +609,23 @@ class Song:
                     )
 
     def _is_bar_boundary(self, beat: float) -> bool:
-        """判断 beat 是否落在拍号表的小节线上。"""
+        """判断 beat 是否落在拍号表的小节线上。
+
+        弱起（``pickup_beats > 0``）时首段的小节网格以**弱起起点**为锚——
+        弱起是一小节之前的不完整小节，第 1 小节紧跟其后（否则弱起曲永远
+        无法通过"段落起点在小节线上"的校验）。
+        """
         for index, point in enumerate(self.meter_map):
+            anchor = self.pickup_beats if index == 0 else point.beat
             segment_end = (
                 self.meter_map[index + 1].beat
                 if index + 1 < len(self.meter_map)
                 else float("inf")
             )
-            if beat < point.beat - _EPS:
+            if beat < anchor - _EPS:
                 return False
             if beat <= segment_end + _EPS:
-                bars = (beat - point.beat) / point.bar_length_beats
+                bars = (beat - anchor) / point.bar_length_beats
                 return abs(bars - round(bars)) <= 1e-6
         return False
 

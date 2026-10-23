@@ -187,9 +187,14 @@ class TestSongValidation:
             song.validate()
 
     def test_section_must_start_on_bar_line(self) -> None:
-        song = Song(pickup_beats=3)
+        """小节线判定：段落必须落在网格上（段间接续保证不漂移，故直测谓词）。"""
+        song = Song()
+        assert song._is_bar_boundary(0.0)
+        assert song._is_bar_boundary(4.0)
+        assert not song._is_bar_boundary(1.5)
         song.add_section("a", bars=2)
-        with pytest.raises(ParameterError, match="小节线"):
+        song.sections[0].start = 1.5  # 绕过 add_section 的自动接续
+        with pytest.raises(ParameterError, match="不相接"):
             song.validate()
 
     def test_meter_change_must_be_on_section_boundary(self) -> None:
@@ -379,3 +384,12 @@ class TestSongGuards:
         notes = list(flatten_notes(song))
         assert len(notes) == 4  # 钢琴 2 + 贝斯 1 + 鼓 1
         assert [note.pitch for note in notes] == [62, 65, 38, 36]
+
+    def test_pickup_anchors_first_bar_grid(self) -> None:
+        """弱起：首段小节网格从弱起起点算起（否则弱起曲无法通过校验）。"""
+        song = Song(pickup_beats=1.0, meter_map=[MeterPoint(0, 4, 4)],
+                    tempo_map=[TempoPoint(0, 120)], key_map=[KeyPoint(0, "C major")])
+        song.add_section("a", bars=2)
+        song.add_section("b", bars=2)
+        song.validate()
+        assert [section.start for section in song.sections] == [1.0, 9.0]

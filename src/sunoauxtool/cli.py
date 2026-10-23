@@ -43,6 +43,7 @@ from sunoauxtool.commands.helpers import (
     _write_single_metadata,
     set_debug,
 )
+from sunoauxtool.compose.cli import app as compose_app
 from sunoauxtool.config import Config
 from sunoauxtool.env import PathResolver
 from sunoauxtool.exceptions import (
@@ -80,6 +81,7 @@ app.add_typer(export_app, name="export")
 app.add_typer(config_app, name="config")
 app.add_typer(ai_app, name="ai")
 app.add_typer(inspire_app, name="inspire")
+app.add_typer(compose_app, name="compose")
 
 
 # ---------------------------------------------------------------------------

@@ -14,6 +14,7 @@
     sunoaux post enhance    （AudioSR 音质提升，R5；依赖可选装）
     sunoaux post suno-dl    （R8 已交付：Suno 官方明文下载三段式）
     sunoaux post strip-meta （R9 已交付：移除 Suno 痕迹——标签清除/保留/覆写 + MOTW）
+    sunoaux compose init / validate / build  （2.0 PR-C：代码驱动编曲，song.toml → MIDI）
 
 映射表（新 -> 旧）：
     pre  melody      -> sunoauxtool generate melody
@@ -38,6 +39,7 @@ from sunoauxtool import __version__
 from sunoauxtool import cli as core_cli
 from sunoauxtool.ai.audiosr import AudioSRAdapter
 from sunoauxtool.commands.helpers import _guard
+from sunoauxtool.compose import cli as compose_cli
 from sunoauxtool.download import cli as download_cli
 from sunoauxtool.exceptions import InputFileError, ParameterError
 from sunoauxtool.video import cli as video_cli
@@ -448,3 +450,24 @@ video_app.command("version")(video_cli.version)
 post_app.add_typer(video_app, name="video")
 
 app.add_typer(post_app, name="post")
+
+
+# ---------------------------------------------------------------------------
+# compose：代码驱动编曲（2.0 PR-C 新增，映射 sunoauxtool compose）
+# ---------------------------------------------------------------------------
+
+compose_app = typer.Typer(
+    help="编曲：song.toml → MIDI + 编排快照（数字轴：代码驱动多轨）",
+    no_args_is_help=True,
+)
+compose_app.command("init", help="(= sunoauxtool compose init) 生成 song.toml 模板")(
+    compose_cli.init
+)
+compose_app.command("validate", help="(= sunoauxtool compose validate) 校验清单")(
+    compose_cli.validate_cmd
+)
+compose_app.command("build", help="(= sunoauxtool compose build) 构建 MIDI + 编排快照")(
+    compose_cli.build
+)
+
+app.add_typer(compose_app, name="compose")

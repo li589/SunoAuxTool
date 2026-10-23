@@ -653,13 +653,20 @@ CI 注意：音频渲染用 2 小节短 fixture；SF2 走 LFS，checkout 后 `gi
 
 ## 15. M1 验收清单
 
-- [ ] `midi/` 包：SMF type 1 往返测试全绿（含 3 点速度表、拍号变化、CC、鼓轨）。
-- [ ] `Song.validate()` 覆盖 6 类不变量，错误码 40 可读。
-- [ ] `compose build`：TOML → 8 轨 MIDI + `arrangement.json`，`--dry-run` 无产物。
-- [ ] `compose render --stems`：8 stems + mix；空测 ≤ −60 dBFS。
-- [ ] 确定性：同 seed 3 次构建 sha256 一致；改单轨 density 不影响他轨。
-- [ ] `score --full`：分谱组/移调/大谱表/分页；MusicXML 校验通过。
-- [ ] 旧命令回归：`generate midi`/`pipeline`/`render` 输出与 1.9.1 一致。
-- [ ] 错误码 40–45 注册进 `ERROR_CODES` 与 `errors` 命令。
-- [ ] 文档：`docs/plan-2.0-multitrack.md`、本文件、`docs/structure.md` 更新，CHANGELOG 2.0.0。
-- [ ] CI 绿；新增模块覆盖率 ≥90%，根套件 ≥87%。
+> **进度**（按 PR 逐项落地，`[~]` = 部分达成，括号内为剩余工作）
+> - PR-A `midi/`（1351f51）：SMF 全保真读写 + 通道分配；68 例。
+> - PR-B `compose/song.py`（68ff64f）：`Song` 编曲模型 + 旧模型适配器；71 例。
+> - PR-C `compose/{spec,api,cli}.py`（本阶段）：清单/DSL/`compose init|validate|build`；121 例。
+>   顺带修正弱起网格锚点（`_is_bar_boundary` 以 `pickup_beats` 为锚）。
+
+- [x] `midi/` 包：SMF type 1 往返测试全绿（含 3 点速度表、拍号变化、CC、鼓轨）。
+- [x] `Song.validate()` 覆盖 6 类不变量，错误码 40 可读。
+- [~] `compose build`：TOML → MIDI + `arrangement.json`，`--dry-run` 无产物 —— 已通（显式音符路径）；
+      8 轨待 PR-D Arranger 自动生成。
+- [ ] `compose render --stems`：8 stems + mix；空测 ≤ −60 dBFS。（PR-E）
+- [~] 确定性：同清单两次构建 sha256 一致已测；seed 派生影响隔离待 PR-D。
+- [ ] `score --full`：分谱组/移调/大谱表/分页；MusicXML 校验通过。（PR-F）
+- [x] 旧命令回归：`generate midi`/`pipeline`/`render` 输出与 1.9.1 一致（根套件全绿）。
+- [~] 错误码 40–45：40/44/45 已注册；41/42/43 随 PR-E/G 注册。
+- [~] 文档：`docs/compose.md` + `docs/structure.md` + README 已更新；CHANGELOG 2.0.0 待 PR-H。
+- [x] CI 绿；新增模块覆盖率 ≥90%（compose 99.7% / midi 96%），根套件 90.76%。
