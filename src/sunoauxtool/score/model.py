@@ -110,8 +110,21 @@ class ScoreTrack:
     is_drum: bool = False
     clef: str = "treble"
     voices: int = 1
+    transpose: int = 0
+    """移调（半音）。正值表示记谱音高比实音高（如 Bb 单簧管 +2）。"""
+    part_group: str = ""
+    """分谱组名（同名的连续声部在 MusicXML 里用括号连成一个 part-group）。"""
     notes: List[ScoreNote] = field(default_factory=list)
     measures: List[ScoreMeasure] = field(default_factory=list)
+
+    @property
+    def is_transposing(self) -> bool:
+        """是否为移调乐器。"""
+        return int(self.transpose) != 0
+
+    def written_pitch(self, sounding: int) -> int:
+        """实音 → 记谱音高（移调乐器记谱更高）。"""
+        return int(sounding) + int(self.transpose)
 
     @property
     def pitch_range(self) -> Tuple[int, int]:
@@ -283,6 +296,85 @@ class Score:
         )
 
     @classmethod
+    def from_song(
+        cls,
+        song,
+        *,
+        title: Optional[str] = None,
+        composer: str = "",
+        bars: Optional[int] = None,
+        clefs: Optional[Dict[str, str]] = None,
+        part_groups: bool = True,
+    ) -> "Score":
+        """从 2.0 的 ``compose.Song`` 构建乐谱（多轨 + 移调 + 分谱组）。
+
+        与 ``from_document`` 的区别：Song 自带速度表/拍号表/调性/段落，
+        且每轨有 ``role``/``transpose``，因此这里能直出**记谱用**的谱面元数据。
+
+        Args:
+            song: ``compose.song.Song``（已编排）。
+            title: 标题；None 用 ``song.title``。
+            composer: 作曲者署名。
+            bars: 小节数；None 用 Song 的小节数（含弱起前的段首对齐）。
+            clefs: ``{轨道名: "treble"|"bass"}`` 覆盖自动谱号判定。
+            part_groups: 是否按角色把同族乐器归入同一 part-group（弦乐组/节奏组）。
+
+        Returns:
+            Score 实例（``transpose``/``part_group`` 已填好）。
+        """
+        from sunoauxtool.score.theory import beats_per_measure
+
+        song.validate()  # 谱面只接受已编排完成的曲子（空曲/半成品应尽早失败）
+        meter = song.meter_map[0]
+        time_signature = f"{meter.numerator}/{meter.denominator}"
+        raw = []
+        for track in song.tracks:
+            notes = [note for clip in track.clips for note in clip.notes]
+            raw.append((
+                track.name or track.id,
+                int(track.instrument.resolved_program()),
+                int(track.channel or 0),
+                bool(track.is_drum),
+                notes,
+            ))
+        last_beat = 0.0
+        for *_meta, notes in raw:
+            for note in notes:
+                last_beat = max(last_beat, float(note.start) + float(note.duration))
+        score = cls._assemble(
+            raw_tracks=raw,
+            title=title if title is not None else (song.title or "Untitled"),
+            composer=composer,
+            key=song.key_map[0].key,
+            time_signature=time_signature,
+            bars=bars,
+            bpm=int(round(song.tempo_map[0].bpm)),
+            clefs=clefs,
+            last_beat=last_beat,
+            capacity=beats_per_measure(time_signature),
+        )
+        for score_track, track in zip(score.tracks, song.tracks):
+            score_track.transpose = int(getattr(track, "transpose", 0) or 0)
+            if part_groups:
+                score_track.part_group = _group_of(track.role)
+        return score
+
+    def parts(self) -> List["Score"]:
+        """拆成单声部分谱（保留标题/调号/拍号/小节数/移调）。"""
+        result: List[Score] = []
+        for track in self.tracks:
+            result.append(Score(
+                title=f"{self.title} - {track.name}",
+                composer=self.composer,
+                bpm=self.bpm,
+                key=self.key,
+                time_signature=self.time_signature,
+                bars=self.bars,
+                tracks=[track],
+            ))
+        return result
+
+    @classmethod
     def from_sequence(
         cls,
         seq,
@@ -381,6 +473,24 @@ class Score:
 # ---------------------------------------------------------------------------
 # 单轨构建
 # ---------------------------------------------------------------------------
+
+#: 编曲角色 → 分谱组（MusicXML part-group 括号）
+_GROUP_BY_ROLE = {
+    "harmony": "键盘组",
+    "pad": "弦乐组",
+    "arpeggio": "键盘组",
+    "bass": "低音组",
+    "melody": "旋律组",
+    "counter": "旋律组",
+    "drums": "节奏组",
+    "percussion": "节奏组",
+}
+
+
+def _group_of(role: str) -> str:
+    """角色 → 分谱组名（未知角色不分组）。"""
+    return _GROUP_BY_ROLE.get(str(role), "")
+
 
 def _build_track(
     *,

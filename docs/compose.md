@@ -1,19 +1,21 @@
 # compose：代码驱动的多轨编曲（2.0）
 
-> 状态：**2.0 PR-E 已交付**（清单 + DSL + Arranger + 分轨渲染/混音 + `compose init/validate/build/render`）。
-> 多声部总谱在 PR-F 接入，音源注册表在 PR-G 接入。
+> 状态：**2.0 PR-F 已交付**（清单 + DSL + Arranger + 分轨渲染/混音 + 总谱/分谱）。
+> 命令面：`compose init / validate / build / render / score`。音源注册表在 PR-G 接入。
 
 `compose` 是"数字轴"入口：一份 `song.toml`（或 Python DSL）完整描述一首曲子，
 构建出**全保真 MIDI**（format 1，含速度表/拍号/调性/CC/音色库）与**编排快照**，
 零交互、字节级可复现。
 
-## 1. 四个命令
+## 1. 五个命令
 
 ```bash
 sunoaux compose init night                 # 生成 night/song.toml（8 轨 6 段模板，可直接构建）
 sunoaux compose validate night/song.toml   # 校验；--json 给机器读
 sunoaux compose build  night/song.toml     # -> out/night/night.mid + arrangement.json
 sunoaux compose render night/song.toml     # -> out/night/night.wav + stems/ + midi/
+sunoaux compose score  night/song.toml --format svg,musicxml --parts
+                                          # -> out/night/score/ + score/parts/
 ```
 
 | 命令 | 关键选项 | 产物 |
@@ -35,6 +37,8 @@ sunoaux compose render night/song.toml     # -> out/night/night.wav + stems/ + m
 | `--dry-run` | 只打印计划（含后端能力），不写任何文件 |
 
 产物：`out/<曲名>/<曲名>.wav`（混音）、`stems/<轨道>.wav`（分轨）、`midi/<轨道>.mid`（每轨切片 MIDI）。
+
+`score` 的选项见 [第 7 节](#7-总谱与分谱pr-f)。
 
 只写 `[[section]]` + `[[track]]` 的 `role` 就够了：`compose build` 会先跑 **Arranger** 自动生成音符。
 手写 `[[track.note]]` 的轨道不受 Arranger 影响（**显式优先**，可混用）。
@@ -188,7 +192,36 @@ Song ─按轨切 MIDI→ midi/<id>.mid ─backend.render→ stems/<id>.wav
 > 环境提示：fluidsynth 与音色库不在 PATH 时，用
 > `--fluidsynth module/fluidsynth/bin/fluidsynth.exe --soundfont module/GeneralUser_GS/GeneralUser-GS/GeneralUser-GS.sf2`。
 
-## 7. 与旧命令的关系
+## 7. 总谱与分谱（PR-F）
+
+```bash
+sunoaux compose score night/song.toml -o out/night/score         --format svg,png,musicxml --parts --composer "齐见林"
+```
+
+| 选项 | 说明 |
+|---|---|
+| `--format svg,png,musicxml` | 可多选（`xml` 是 `musicxml` 的别名） |
+| `--parts` | 额外导出每声部分谱到 `parts/` |
+| `--composer` | 署名（写进 SVG 标题区与 MusicXML `<creator>`） |
+| `--no-part-groups` | 不输出 `<part-group>` 括号 |
+| `--scale` | PNG 超采样倍数（默认 2.0） |
+
+产物：`<曲名>.svg/.png/.musicxml`（总谱）+ `parts/<声部>.*`（分谱）。
+
+**移调与分谱组**（本 PR 新增，属于 `Score` 模型层）：
+
+| 能力 | 实现 |
+|---|---|
+| 移调乐器 | `[[track]] transpose = 2`（Bb 单簧管记谱比实音高 2 个半音）；`Song → Score → MusicXML` 全链透传 |
+| 记谱音高 | MusicXML `<pitch>` 按记谱写出 + `<transpose><chromatic/diatonic>` 标注 |
+| 分谱组 | 按角色自动分组（键盘组/弦乐组/低音组/旋律组/节奏组），MusicXML `<part-group type="start|stop">` + 括号 |
+| 分谱 | `Score.parts()` 逐声部拆成独立谱（保留标题/调号/拍号/小节数/移调） |
+
+> **已知范围**：SVG/PNG 按**实音**绘制（移调只体现在 MusicXML）；
+> 大谱表（钢琴两行谱）与分页尚在 PR-F 之后单开。另：符干长度偏长的视觉问题
+> 属 1.7.0 起的既有渲染行为（旧管线同样存在），不在本 PR 改动范围内。
+
+## 8. 与旧命令的关系
 
 | 场景 | 用哪个 |
 |---|---|
@@ -198,11 +231,12 @@ Song ─按轨切 MIDI→ midi/<id>.mid ─backend.render→ stems/<id>.wav
 
 旧命令在 2.0 全周期保留；`compose` 不改变它们的行为。
 
-## 8. 后续（按 PR 推进）
+## 9. 后续（按 PR 推进）
 
 | PR | 内容 | 用户可见变化 |
 |---|---|---|
 | ~~D~~ | ~~Arranger v1~~ | 已交付：清单只写 `role`/`energy` 就能生成音符 |
 | ~~E~~ | ~~渲染 v2（后端协议 / 分轨 / 混音）~~ | 已交付：`compose render` → mix + stems/ + midi/ |
-| F | 总谱 v2（Part/移调/大谱表/分页） | `compose build --score svg,musicxml` |
+| ~~F~~ | ~~总谱 v2（移调 / 分谱组 / 分谱）~~ | 已交付：`compose score` → 总谱 + 分谱 |
+| F+ | 大谱表（钢琴两行）、分页、演奏记号 | 更接近出版级总谱 |
 | G | SoundBank 注册表 | `soundbank list/info/verify`，每轨独立选库 |

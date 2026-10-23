@@ -6,8 +6,7 @@
     compose build     song.toml → Arranger 编排 → <name>.mid + arrangement.json
                       `--dry-run` 只打印计划；`--no-arrange` 只用手写音符
     compose render    song.toml → 分轨 WAV + 混音成品（每轨独立渲染后混音）
-
-`compose score`（多声部总谱）随 PR-F 落地。
+    compose score     song.toml → 多声部总谱 SVG/PNG/MusicXML（--parts 出分谱）
 """
 from __future__ import annotations
 
@@ -26,6 +25,12 @@ from sunoauxtool.compose.render import (
     backend_summary,
     describe_result,
     render_song,
+)
+from sunoauxtool.compose.score import (
+    SCORE_FORMATS,
+    ScoreOptions,
+    describe_score,
+    export_score,
 )
 from sunoauxtool.compose.song import Song
 from sunoauxtool.compose.spec import SpecError, SongSpec
@@ -352,4 +357,56 @@ def render(
         typer.echo(f"{prefix}计划渲染 {len(song.tracks)} 轨 → {out_dir}")
         typer.echo(f"  {backend_summary(backend)}")
     for line in describe_result(result):
+        typer.echo(f"  {line}")
+
+
+@app.command("score")
+@_guard
+def score(
+    path: Path = typer.Argument(..., help="song.toml 路径"),
+    out: Optional[Path] = typer.Option(
+        None, "--out", "-o", help="输出目录（默认 out/<曲名>/score）"
+    ),
+    formats: str = typer.Option("svg", "--format", help="svg,png,musicxml（逗号分隔）"),
+    parts: bool = typer.Option(False, "--parts", help="额外导出每声部分谱"),
+    composer: str = typer.Option("", "--composer", help="作曲者署名"),
+    no_part_groups: bool = typer.Option(
+        False, "--no-part-groups", help="MusicXML 不输出分谱组括号"
+    ),
+    scale: float = typer.Option(2.0, "--scale", help="PNG 超采样倍数"),
+    no_arrange: bool = typer.Option(
+        False, "--no-arrange", help="不做自动编排（只用清单里的 [[track.note]]）"
+    ),
+) -> None:
+    """导出多声部总谱（SVG/PNG/MusicXML，可选分谱）。"""
+    if not path.exists():
+        typer.echo(f"清单不存在: {path}", err=True)
+        raise typer.Exit(1)
+
+    wanted = tuple(part.strip().lower() for part in str(formats).split(",") if part.strip())
+    unknown = [fmt for fmt in wanted if fmt not in SCORE_FORMATS and fmt != "xml"]
+    if unknown:
+        typer.echo(
+            f"不支持的格式 {unknown}；可用: {', '.join(sorted(SCORE_FORMATS))}", err=True
+        )
+        raise typer.Exit(1)
+
+    spec = SongSpec.from_toml(path)
+    song = spec.to_song() if no_arrange else arrange(spec)
+    base = _slug(song.title or path.parent.name)
+    out_dir = Path(out) if out is not None else Path("out") / base / "score"
+
+    result = export_score(
+        song,
+        out_dir=out_dir,
+        options=ScoreOptions(
+            formats=wanted,
+            parts=parts,
+            composer=composer,
+            part_groups=not no_part_groups,
+            scale=scale,
+        ),
+    )
+    typer.echo(f"已导出总谱 → {out_dir}")
+    for line in describe_score(result):
         typer.echo(f"  {line}")

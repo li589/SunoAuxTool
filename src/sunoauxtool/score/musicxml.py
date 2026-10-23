@@ -61,6 +61,10 @@ __all__ = [
 DIVISIONS = 16
 
 #: MusicXML 版本与本模块声明的外部 DTD
+#: 常见移调乐器的 diatonic 步数（MusicXML ``<transpose><diatonic>``）
+_DIATONIC_STEPS = {2: 1, -2: -1, 3: 2, -3: -2, 5: 4, -5: -4, 7: 4, -7: -4,
+                   12: 7, -12: -7}
+
 MUSICXML_VERSION = "4.0"
 _DOCTYPE = (
     '<!DOCTYPE score-partwise PUBLIC "-//Recordare//DTD MusicXML 4.0 Partwise//EN" '
@@ -99,6 +103,9 @@ class MusicXmlOptions:
 
     include_midi_instruments: bool = True
     """``<part-list>`` 里写 ``<midi-instrument>``（通道/音色，1 基）。"""
+
+    include_part_groups: bool = True
+    """按 ``ScoreTrack.part_group`` 输出 ``<part-group>`` 括号（分谱组）。"""
 
     encoding_date: Optional[str] = None
     """``<encoding-date>``（``YYYY-MM-DD``）；None 表示不写，保证输出确定性。"""
@@ -229,12 +236,45 @@ def _build_root(score: Score, opts: MusicXmlOptions) -> ET.Element:
             ET.SubElement(encoding, "encoding-date").text = opts.encoding_date
 
     part_list = ET.SubElement(root, "part-list")
+    spans = _part_group_spans(score) if opts.include_part_groups else []
+    starts = {start: (number, name) for number, (start, _end, name)
+              in enumerate(spans, start=1)}
+    ends = {end: number for number, (_start, end, _name) in enumerate(spans, start=1)}
     for index, track in enumerate(score.tracks):
+        if index in starts:
+            number, name = starts[index]
+            marker = ET.SubElement(part_list, "part-group",
+                                   {"type": "start", "number": str(number)})
+            ET.SubElement(marker, "group-name").text = name
+            ET.SubElement(marker, "group-symbol").text = "bracket"
         _build_score_part(part_list, track, index, opts)
+        if index in ends:
+            ET.SubElement(part_list, "part-group",
+                          {"type": "stop", "number": str(ends[index])})
 
     for index, track in enumerate(score.tracks):
         root.append(_build_part(score, track, index, opts))
     return root
+
+
+def _part_group_spans(score: Score) -> List[tuple[int, int, str]]:
+    """扫描轨道序列，返回 ``[(首个下标, 末个下标, 组名)]``（只认连续同名）。"""
+    spans: List[tuple[int, int, str]] = []
+    start: int | None = None
+    current = ""
+    for index, track in enumerate(score.tracks):
+        name = str(getattr(track, "part_group", "") or "")
+        if name and name == current and start is not None:
+            spans[-1] = (spans[-1][0], index, name)
+            continue
+        if name:
+            start = index
+            current = name
+            spans.append((index, index, name))
+        else:
+            start = None
+            current = ""
+    return spans
 
 
 def _build_score_part(
@@ -297,6 +337,13 @@ def _emit_attributes(node: ET.Element, score: Score, track: ScoreTrack) -> None:
     clef = ET.SubElement(attributes, "clef")
     ET.SubElement(clef, "sign").text = sign
     ET.SubElement(clef, "line").text = line
+
+    transpose = int(getattr(track, "transpose", 0) or 0)
+    if transpose:
+        node = ET.SubElement(attributes, "transpose")
+        if _DIATONIC_STEPS.get(transpose) is not None:
+            ET.SubElement(node, "diatonic").text = str(_DIATONIC_STEPS[transpose])
+        ET.SubElement(node, "chromatic").text = str(transpose)
 
 
 def _emit_tempo(node: ET.Element, bpm: int) -> None:
@@ -468,7 +515,7 @@ def _emit_note(
     flats: bool,
 ) -> None:
     """写一个 ``<note>`` 元素（元素次序遵循 MusicXML 的 note 复合类型序列）。"""
-    step, octave, accidental = _spell(note, flats)
+    step, octave, accidental = _spell(note, flats, track.transpose)
     # 变音记号按「调号是否已覆盖」决定：调号覆盖时不写 <accidental>（<alter> 仍照写）
     glyph = (
         accidental_glyph(LETTERS.index(step), accidental, key_acc)
@@ -512,11 +559,14 @@ def _emit_note(
             ET.SubElement(notations, "tied", {"type": "start"})
 
 
-def _spell(note: ScoreNote, flats: bool) -> Tuple[str, int, int]:
-    """音高 -> ``(step, octave, alter)``。休止符返回占位 ``("C", 4, 0)``（不写出）。"""
+def _spell(note: ScoreNote, flats: bool, transpose: int = 0) -> Tuple[str, int, int]:
+    """音高 -> ``(step, octave, alter)``。
+
+    移调乐器按**记谱音高**写出（实音 + ``transpose``），休止符返回占位 ``("C", 4, 0)``。
+    """
     if note.is_rest:
         return "C", 4, 0
-    letter, diatonic, accidental = spell_pitch(note.pitch, flats)
+    letter, diatonic, accidental = spell_pitch(note.pitch + int(transpose), flats)
     return LETTERS[letter], diatonic // 7, accidental
 
 

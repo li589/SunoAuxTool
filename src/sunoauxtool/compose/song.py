@@ -250,6 +250,8 @@ class Track:
     octave: int = 4
     range: tuple[int, int] | None = None
     muted: bool = False
+    transpose: int = 0
+    """移调（半音，仅影响总谱记谱：正值=记谱比实音高，如 Bb 单簧管 +2）。"""
 
     def __post_init__(self) -> None:
         if not str(self.id).strip():
@@ -272,6 +274,8 @@ class Track:
             raise ParameterError(
                 f"通道 {DRUM_CHANNEL} 保留给鼓轨，track={self.id!r} role={self.role!r}"
             )
+        if not -24 <= int(self.transpose) <= 24:
+            raise ParameterError(f"transpose 超出范围 (-24..24): {self.transpose}")
         if not 0 <= int(self.octave) <= 9:
             raise ParameterError(f"octave 超出范围 (0-9): {self.octave}")
         if self.range is not None:
@@ -295,6 +299,7 @@ class Track:
             "instrument": self.instrument.to_dict(),
             "channel": self.channel,
             "octave": self.octave,
+            "transpose": self.transpose,
             "range": list(self.range) if self.range else None,
             "muted": self.muted,
             "mix": self.mix.to_dict(),
@@ -330,6 +335,7 @@ class Track:
             instrument=InstrumentRef.from_dict(data.get("instrument", {})),
             channel=data.get("channel"),
             octave=data.get("octave", 4),
+            transpose=int(data.get("transpose", 0)),
             range=tuple(data["range"]) if data.get("range") else None,
             muted=bool(data.get("muted", False)),
             mix=MixStrip.from_dict(data.get("mix", {})),

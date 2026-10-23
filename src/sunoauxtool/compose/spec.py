@@ -253,6 +253,7 @@ class TrackSpec:
     program: int | None = None
     channel: int | None = None
     octave: int = 4
+    transpose: int = 0
     range: tuple[int, int] | None = None
     sections: list[str] = field(default_factory=list)
     mix: MixStrip = field(default_factory=MixStrip)
@@ -272,6 +273,7 @@ class TrackSpec:
             "program": self.program,
             "channel": self.channel,
             "octave": self.octave,
+            "transpose": self.transpose,
             "range": list(self.range) if self.range else None,
             "sections": list(self.sections),
             "mix": self.mix.to_dict(),
@@ -479,6 +481,10 @@ class SongSpec:
                 channels[track.channel] = track.id
             if track.role == "drums":
                 drums += 1
+            if not -24 <= track.transpose <= 24:
+                raise SpecError(f"{path}/transpose",
+                                f"transpose 必须在 -24..24，实际为 {track.transpose}",
+                                ARRANGEMENT_ERROR)
             if not 0 <= track.octave <= 9:
                 raise SpecError(f"{path}/octave", f"octave 必须在 0..9，实际为 {track.octave}",
                                 ARRANGEMENT_ERROR)
@@ -628,6 +634,7 @@ class SongSpec:
             clips=clips,
             mix=spec.mix,
             octave=spec.octave,
+            transpose=spec.transpose,
             range=spec.range,
             muted=spec.muted,
         )
@@ -704,7 +711,7 @@ def _section_from(item: dict, path: str) -> SectionSpec:
 
 def _track_from(item: dict, path: str) -> TrackSpec:
     _only(item, ("id", "name", "role", "instrument", "bank", "program", "channel",
-                 "octave", "range", "sections", "mix", "muted", "note",
+                 "octave", "transpose", "range", "sections", "mix", "muted", "note",
                  "density", "groove"), path)
     raw_range = item.get("range")
     if raw_range is None:
@@ -740,6 +747,7 @@ def _track_from(item: dict, path: str) -> TrackSpec:
         program=_opt(item, "program", "int", None, path),
         channel=_opt(item, "channel", "int", None, path),
         octave=_opt(item, "octave", "int", 4, path),
+        transpose=_opt(item, "transpose", "int", 0, path),
         range=narrow,
         sections=sections,
         mix=mix,

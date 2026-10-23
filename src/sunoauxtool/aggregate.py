@@ -14,7 +14,7 @@
     sunoaux post enhance    （AudioSR 音质提升，R5；依赖可选装）
     sunoaux post suno-dl    （R8 已交付：Suno 官方明文下载三段式）
     sunoaux post strip-meta （R9 已交付：移除 Suno 痕迹——标签清除/保留/覆写 + MOTW）
-    sunoaux compose init / validate / build / render  （2.0 PR-C/D/E：代码驱动编曲 → MIDI/音频）
+    sunoaux compose init / validate / build / render / score  （2.0 PR-C..F：编曲 → MIDI/音频/总谱）
 
 映射表（新 -> 旧）：
     pre  melody      -> sunoauxtool generate melody
@@ -471,6 +471,9 @@ compose_app.command("build", help="(= sunoauxtool compose build) 构建 MIDI + �
 )
 compose_app.command("render", help="(= sunoauxtool compose render) 渲染分轨 + 混音成品")(
     compose_cli.render
+)
+compose_app.command("score", help="(= sunoauxtool compose score) 导出总谱/分谱（SVG/PNG/MusicXML）")(
+    compose_cli.score
 )
 
 app.add_typer(compose_app, name="compose")

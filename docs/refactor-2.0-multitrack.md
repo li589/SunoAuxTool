@@ -660,8 +660,11 @@ CI 注意：音频渲染用 2 小节短 fixture；SF2 走 LFS，checkout 后 `gi
 >   顺带修正弱起网格锚点（`_is_bar_boundary` 以 `pickup_beats` 为锚）。
 > - PR-D `compose/{arranger,harmony,melody,rhythm,orchestration,humanize,rng}.py`（73c8b4d）：
 >   能量→角色矩阵、动机发展与终止式、7 套 groove、blake2b 种子隔离、人性化；243 例。
-> - PR-E `render/{backend,mixer,exceptions}.py` + `compose/render.py`（本阶段）：
+> - PR-E `render/{backend,mixer,exceptions}.py` + `compose/render.py`（3f49ae6）：
 >   后端协议、流式分轨混音（balance 声像）、每轨独立渲染 → stems + mix；45 例。
+> - PR-F `score/model.py`（transpose/part_group/from_song/parts）、`score/musicxml.py`
+>   （`<transpose>`/`<part-group>`/记谱音高）、`compose/score.py` + `compose score`（本阶段）：
+>   移调全链透传、分谱组括号、逐声部分谱；25 + 21 例。
 
 - [x] `midi/` 包：SMF type 1 往返测试全绿（含 3 点速度表、拍号变化、CC、鼓轨）。
 - [x] `Song.validate()` 覆盖 6 类不变量，错误码 40 可读。
@@ -670,7 +673,8 @@ CI 注意：音频渲染用 2 小节短 fixture；SF2 走 LFS，checkout 后 `gi
 - [x] `compose render --stems`：8 stems + mix；空测 `mix − Σstems` 实测 −155 dBFS（要求 ≤ −60 dBFS）。
 - [x] 确定性：同 seed 构建 sha256 一致；改单轨 density 不影响他轨；增删轨道不改变他轨
       （PR-D 起由 `(seed, section, track, role)` 派生独立 RNG）。
-- [ ] `score --full`：分谱组/移调/大谱表/分页；MusicXML 校验通过。（PR-F）
+- [~] `score --full`：分谱组/移调/分谱已交付（`compose score --parts`，MusicXML 校验通过）；
+      大谱表（钢琴两行）与分页留待 F+。
 - [x] 旧命令回归：`generate midi`/`pipeline`/`render` 输出与 1.9.1 一致（根套件全绿）。
 - [~] 错误码 40–45：40/42/43/44/45 已注册（PR-C/E）；41 随 PR-G（音源注册表）注册。
 - [~] 文档：`docs/compose.md` + `docs/structure.md` + README 已更新；CHANGELOG 2.0.0 待 PR-H。
