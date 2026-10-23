@@ -1,0 +1,257 @@
+[
+ [
+  {
+   "tick": 0,
+   "type": "track_name",
+   "name": "夜航 Night Flight"
+  },
+  {
+   "tick": 0,
+   "type": "set_tempo",
+   "tempo": 625000
+  },
+  {
+   "tick": 0,
+   "type": "time_signature",
+   "numerator": 4,
+   "denominator": 4,
+   "clocks_per_click": 24,
+   "notated_32nd_notes_per_beat": 8
+  },
+  {
+   "tick": 0,
+   "type": "key_signature",
+   "key": "Dm"
+  },
+  {
+   "tick": 0,
+   "type": "marker",
+   "text": "前奏"
+  },
+  {
+   "tick": 15360,
+   "type": "marker",
+   "text": "主歌"
+  },
+  {
+   "tick": 30720,
+   "type": "set_tempo",
+   "tempo": 576923
+  },
+  {
+   "tick": 61440,
+   "type": "set_tempo",
+   "tempo": 500000
+  },
+  {
+   "tick": 61440,
+   "type": "time_signature",
+   "numerator": 3,
+   "denominator": 4,
+   "clocks_per_click": 24,
+   "notated_32nd_notes_per_beat": 8
+  },
+  {
+   "tick": 61440,
+   "type": "end_of_track"
+  }
+ ],
+ [
+  {
+   "tick": 0,
+   "type": "track_name",
+   "name": "Piano"
+  },
+  {
+   "tick": 0,
+   "type": "program_change",
+   "program": 0,
+   "channel": 0
+  },
+  {
+   "tick": 0,
+   "type": "control_change",
+   "control": 7,
+   "value": 96,
+   "channel": 0
+  },
+  {
+   "tick": 0,
+   "type": "control_change",
+   "control": 10,
+   "value": 52,
+   "channel": 0
+  },
+  {
+   "tick": 0,
+   "type": "note_on",
+   "note": 62,
+   "velocity": 80,
+   "channel": 0
+  },
+  {
+   "tick": 1920,
+   "type": "note_off",
+   "note": 62,
+   "velocity": 64,
+   "channel": 0
+  },
+  {
+   "tick": 1920,
+   "type": "note_on",
+   "note": 65,
+   "velocity": 72,
+   "channel": 0
+  },
+  {
+   "tick": 3840,
+   "type": "note_off",
+   "note": 65,
+   "velocity": 64,
+   "channel": 0
+  },
+  {
+   "tick": 3840,
+   "type": "note_on",
+   "note": 69,
+   "velocity": 90,
+   "channel": 0
+  },
+  {
+   "tick": 7680,
+   "type": "note_off",
+   "note": 69,
+   "velocity": 64,
+   "channel": 0
+  },
+  {
+   "tick": 7680,
+   "type": "control_change",
+   "control": 64,
+   "value": 127,
+   "channel": 0
+  },
+  {
+   "tick": 7680,
+   "type": "end_of_track"
+  }
+ ],
+ [
+  {
+   "tick": 0,
+   "type": "track_name",
+   "name": "Cello"
+  },
+  {
+   "tick": 0,
+   "type": "control_change",
+   "control": 0,
+   "value": 0,
+   "channel": 1
+  },
+  {
+   "tick": 0,
+   "type": "control_change",
+   "control": 32,
+   "value": 1,
+   "channel": 1
+  },
+  {
+   "tick": 0,
+   "type": "program_change",
+   "program": 42,
+   "channel": 1
+  },
+  {
+   "tick": 0,
+   "type": "note_on",
+   "note": 38,
+   "velocity": 70,
+   "channel": 1
+  },
+  {
+   "tick": 3840,
+   "type": "note_off",
+   "note": 38,
+   "velocity": 64,
+   "channel": 1
+  },
+  {
+   "tick": 3840,
+   "type": "note_on",
+   "note": 41,
+   "velocity": 74,
+   "channel": 1
+  },
+  {
+   "tick": 7680,
+   "type": "note_off",
+   "note": 41,
+   "velocity": 64,
+   "channel": 1
+  },
+  {
+   "tick": 7680,
+   "type": "end_of_track"
+  }
+ ],
+ [
+  {
+   "tick": 0,
+   "type": "track_name",
+   "name": "Drums"
+  },
+  {
+   "tick": 0,
+   "type": "program_change",
+   "program": 0,
+   "channel": 9
+  },
+  {
+   "tick": 0,
+   "type": "note_on",
+   "note": 36,
+   "velocity": 100,
+   "channel": 9
+  },
+  {
+   "tick": 960,
+   "type": "note_off",
+   "note": 36,
+   "velocity": 64,
+   "channel": 9
+  },
+  {
+   "tick": 960,
+   "type": "note_on",
+   "note": 42,
+   "velocity": 60,
+   "channel": 9
+  },
+  {
+   "tick": 1920,
+   "type": "note_off",
+   "note": 42,
+   "velocity": 64,
+   "channel": 9
+  },
+  {
+   "tick": 1920,
+   "type": "note_on",
+   "note": 38,
+   "velocity": 90,
+   "channel": 9
+  },
+  {
+   "tick": 2880,
+   "type": "note_off",
+   "note": 38,
+   "velocity": 64,
+   "channel": 9
+  },
+  {
+   "tick": 2880,
+   "type": "end_of_track"
+  }
+ ]
+]

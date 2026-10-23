@@ -67,6 +67,8 @@ ERROR_CODES: List[Tuple[int, str, str]] = [
     # ---- sunoauxtool.meta 段（35-36，语义见 meta/exceptions.py）----
     (35, "容器不支持或不可解析", "meta：扩展名不在 wav/mp3/flac/m4a/ogg/opus 内，或结构损坏"),
     (36, "标签读写失败", "meta：mutagen 保存失败、WAV 重写失败、尾部 legacy 标签剥除失败"),
+    # ---- sunoauxtool.midi 段（45，2.0 PR-A；40-44 留给 compose）----
+    (45, "MIDI 通道不足", "midi：鼓轨冲突或旋律轨超过 15 条（通道 9 保留给鼓）"),
 ]
 
 

@@ -50,7 +50,7 @@
 ```
 src/sunoauxtool/
 ├── compose/                    # 新增：编曲域（纯领域，不依赖 CLI/render）
-│   ├── song.py                 # Song/Section/Track/Clip/NoteEvent/TempoMap/MeterMap/KeyMap/MixStrip
+│   ├── song.py                 # Song/Section/Track/Clip/MixStrip（NoteEvent/时间表复用 midi.document）
 │   ├── spec.py                 # SongSpec：TOML 解析 + 语义校验（错误定位到 JSON Pointer）
 │   ├── arranger.py             # Spec + seed → Song（编排主流程）
 │   ├── harmony.py              # 和弦进行/声部配置（复用 music_theory）

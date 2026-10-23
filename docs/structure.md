@@ -14,6 +14,7 @@ SunoAuxTool/
 │   ├── export/                 # 导出（音频封装 / metadata）
 │   ├── generators/             # 旋律 / MIDI 程序化生成
 │   ├── meta/                   # 标签清洗子包（R9）：sanitize + 专属异常（错误码 35-36）
+│   ├── midi/                   # MIDI 交换层（2.0 PR-A）：全保真 SMF 读写 + 通道分配（错误码 45）
 │   ├── models/                 # 数据模型
 │   ├── music_theory/           # 乐理（和弦 / 调式 / 对位）
 │   ├── render/                 # FluidSynth 渲染
@@ -27,6 +28,7 @@ SunoAuxTool/
 │   ├── core/                   #   主 CLI / pipeline / dsp / doctor / 发布守卫等
 │   ├── download/               #   后处理域（含 unlock 全套 + usesuno 源）
 │   ├── meta/                   #   R9 标签清洗（sanitize 全模式）
+│   ├── midi/                   #   2.0 PR-A MIDI 交换层（SMF 读写 / 通道 / golden）
 │   ├── pre/                    #   创作域（generators / theory / render / inspire）
 │   ├── score/                  #   谱面 + 导出 CLI
 │   ├── video/                  #   视频域
