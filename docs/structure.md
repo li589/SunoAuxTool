@@ -18,7 +18,7 @@ SunoAuxTool/
 │   ├── midi/                   # MIDI 交换层（2.0 PR-A）：全保真 SMF 读写 + 通道分配（错误码 45）
 │   ├── models/                 # 数据模型
 │   ├── music_theory/           # 乐理（和弦 / 调式 / 对位）
-│   ├── render/                 # FluidSynth 渲染
+│   ├── render/                 # 渲染：fluidsynth 旧类 + backend 协议(2.0 PR-E) + mixer 分轨混音
 │   ├── score/                  # 谱面子系统（theory→model→layout→drawing→svg/jianpu/png/musicxml）
 │   ├── styles/                 # 风格标签
 │   ├── video/                  # 音乐视频（原 videomaker）

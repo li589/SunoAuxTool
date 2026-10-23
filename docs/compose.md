@@ -1,18 +1,19 @@
 # compose：代码驱动的多轨编曲（2.0）
 
-> 状态：**2.0 PR-D 已交付**（清单解析 + DSL + Arranger 自动编曲 + `compose init/validate/build`）。
-> 分轨渲染（`compose render --stems`）与总谱 v2 在 PR-E/F 接入。
+> 状态：**2.0 PR-E 已交付**（清单 + DSL + Arranger + 分轨渲染/混音 + `compose init/validate/build/render`）。
+> 多声部总谱在 PR-F 接入，音源注册表在 PR-G 接入。
 
 `compose` 是"数字轴"入口：一份 `song.toml`（或 Python DSL）完整描述一首曲子，
 构建出**全保真 MIDI**（format 1，含速度表/拍号/调性/CC/音色库）与**编排快照**，
 零交互、字节级可复现。
 
-## 1. 三个命令
+## 1. 四个命令
 
 ```bash
 sunoaux compose init night                 # 生成 night/song.toml（8 轨 6 段模板，可直接构建）
 sunoaux compose validate night/song.toml   # 校验；--json 给机器读
 sunoaux compose build  night/song.toml     # -> out/night/night.mid + arrangement.json
+sunoaux compose render night/song.toml     # -> out/night/night.wav + stems/ + midi/
 ```
 
 | 命令 | 关键选项 | 产物 |
@@ -20,6 +21,20 @@ sunoaux compose build  night/song.toml     # -> out/night/night.mid + arrangemen
 | `init` | `--out/-o DIR`、`--title`、`--force` | `DIR/song.toml`（8 轨 6 段 / 36 小节；`init` 会立刻编排一遍自检） |
 | `validate` | `--json` | 摘要（曲名/调性/速度/段落/轨道/音符/时长）或结构化错误 |
 | `build` | `--out/-o DIR`、`--dry-run`、`--no-arrange`、`--no-humanize` | `<曲名>.mid` + `arrangement.json`；`--dry-run` 只打印通道分配与产物路径 |
+
+`render` 的关键选项：
+
+| 选项 | 说明 |
+|---|---|
+| `--soundfont` / `--fluidsynth` | 覆盖配置中的音色库与 fluidsynth 路径 |
+| `--stems/--no-stems` | 是否导出分轨（默认导出） |
+| `--format wav / flac` | 混音成品格式（**分轨恒为 WAV**：fluidsynth 只写 wav） |
+| `--sample-rate` | 采样率（默认 44100） |
+| `--no-normalize` | 不做峰值归一（默认归一到 −0.5 dBFS） |
+| `--no-arrange` | 不做自动编排（只用清单里的音符） |
+| `--dry-run` | 只打印计划（含后端能力），不写任何文件 |
+
+产物：`out/<曲名>/<曲名>.wav`（混音）、`stems/<轨道>.wav`（分轨）、`midi/<轨道>.mid`（每轨切片 MIDI）。
 
 只写 `[[section]]` + `[[track]]` 的 `role` 就够了：`compose build` 会先跑 **Arranger** 自动生成音符。
 手写 `[[track.note]]` 的轨道不受 Arranger 影响（**显式优先**，可混用）。
@@ -149,7 +164,31 @@ DSL 只做"收集"，编译成与 TOML **同构**的 `SongSpec`，因此两种�
 
 人性化（`humanize`）：力度 ±6%、微时序 ±1.5% 拍（写在 `offset_ticks`，不破坏节拍网格）。
 
-## 6. 与旧命令的关系
+## 6. 渲染与混音（PR-E）
+
+**每轨单独渲染，再线性叠加**——这是唯一能保证"分轨 = 母带成分"的做法：
+
+```
+Song ─按轨切 MIDI→ midi/<id>.mid ─backend.render→ stems/<id>.wav
+                                              └─mixer.mixdown→ <曲名>.wav
+```
+
+- 混音公式：`mix = Σ (gain_db · balance(pan) · stem)`，实测 `mix − Σstems` 峰值 **−155 dBFS**
+  （M1 验收要求 ≤ −60 dBFS，即"母带里没有来路不明的信号"）；
+- 声像用**立体声 balance 定律**（中置 1.0/1.0），刻意不用等功率——stem 已是立体声，
+  再乘 0.707 会让所有中置轨无故 −3 dB；
+- `mute`/`solo` 走通道条语义（有 solo 时只混 solo 轨）；
+- 分块流式（默认 5 秒一块，两遍扫描：先求峰值再归一写盘），长工程不吃内存；
+- 归一上限 64×（避免把极静的轨道放大成噪声墙）；**不做母带**（N6：不承诺发行级）。
+
+后端解耦：`render/backend.py` 定义 `RenderBackend` 协议 + `RenderCapabilities`，
+`FluidSynthBackend` 只是它的一个实现（旧 `FluidSynthRenderer` 一行未改）。
+错误码 42（后端不可用）/43（分轨或混音失败）。
+
+> 环境提示：fluidsynth 与音色库不在 PATH 时，用
+> `--fluidsynth module/fluidsynth/bin/fluidsynth.exe --soundfont module/GeneralUser_GS/GeneralUser-GS/GeneralUser-GS.sf2`。
+
+## 7. 与旧命令的关系
 
 | 场景 | 用哪个 |
 |---|---|
@@ -159,11 +198,11 @@ DSL 只做"收集"，编译成与 TOML **同构**的 `SongSpec`，因此两种�
 
 旧命令在 2.0 全周期保留；`compose` 不改变它们的行为。
 
-## 7. 后续（按 PR 推进）
+## 8. 后续（按 PR 推进）
 
 | PR | 内容 | 用户可见变化 |
 |---|---|---|
 | ~~D~~ | ~~Arranger v1~~ | 已交付：清单只写 `role`/`energy` 就能生成音符 |
-| E | 渲染 v2（多库、stems、混音） | `compose render --stems` → mix.wav + stems/ |
+| ~~E~~ | ~~渲染 v2（后端协议 / 分轨 / 混音）~~ | 已交付：`compose render` → mix + stems/ + midi/ |
 | F | 总谱 v2（Part/移调/大谱表/分页） | `compose build --score svg,musicxml` |
 | G | SoundBank 注册表 | `soundbank list/info/verify`，每轨独立选库 |

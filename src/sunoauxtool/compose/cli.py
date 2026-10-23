@@ -5,8 +5,9 @@
     compose validate  校验清单（结构 44 / 语义 40，错误带 JSON Pointer）
     compose build     song.toml → Arranger 编排 → <name>.mid + arrangement.json
                       `--dry-run` 只打印计划；`--no-arrange` 只用手写音符
+    compose render    song.toml → 分轨 WAV + 混音成品（每轨独立渲染后混音）
 
-`compose render`（音频/stems）随 2.0 PR-E 落地，`compose score` 随 PR-F 落地。
+`compose score`（多声部总谱）随 PR-F 落地。
 """
 from __future__ import annotations
 
@@ -17,12 +18,21 @@ from typing import Optional
 
 import typer
 
-from sunoauxtool.commands.helpers import _guard
+from sunoauxtool.commands.helpers import _guard, _load_config
 from sunoauxtool.compose.arranger import ArrangeOptions, arrange
+from sunoauxtool.compose.render import (
+    FORMATS,
+    RenderOptions,
+    backend_summary,
+    describe_result,
+    render_song,
+)
 from sunoauxtool.compose.song import Song
 from sunoauxtool.compose.spec import SpecError, SongSpec
+from sunoauxtool.env import PathResolver
 from sunoauxtool.logging_setup import get_logger
 from sunoauxtool.midi.io import write_smf
+from sunoauxtool.render.backend import FluidSynthBackend
 
 logger = get_logger("compose.cli")
 
@@ -276,4 +286,70 @@ def build(
     typer.echo(f"已构建 {midi_path}")
     typer.echo(f"  编排快照 {snapshot_path}")
     for line in plan[:-1]:
+        typer.echo(f"  {line}")
+
+
+@app.command("render")
+@_guard
+def render(
+    ctx: typer.Context,
+    path: Path = typer.Argument(..., help="song.toml 路径"),
+    out: Optional[Path] = typer.Option(
+        None, "--out", "-o", help="输出目录（默认 out/<曲名>/）"
+    ),
+    soundfont: Optional[str] = typer.Option(
+        None, "--soundfont", help="SoundFont 路径（覆盖配置）"
+    ),
+    fluidsynth: Optional[str] = typer.Option(
+        None, "--fluidsynth", help="fluidsynth 可执行文件路径（覆盖配置）"
+    ),
+    stems: bool = typer.Option(True, "--stems/--no-stems", help="是否导出分轨"),
+    fmt: str = typer.Option("wav", "--format", help="成品格式：wav / flac"),
+    sample_rate: int = typer.Option(44100, "--sample-rate", help="采样率"),
+    no_normalize: bool = typer.Option(
+        False, "--no-normalize", help="不做峰值归一（原样输出，可能削顶）"
+    ),
+    no_arrange: bool = typer.Option(
+        False, "--no-arrange", help="不做自动编排（只用清单里的 [[track.note]]）"
+    ),
+    dry_run: bool = typer.Option(False, "--dry-run", help="只打印计划，不写文件"),
+) -> None:
+    """渲染成品音频：每轨独立渲染成分轨，再按混音通道条叠加。"""
+    if not path.exists():
+        typer.echo(f"清单不存在: {path}", err=True)
+        raise typer.Exit(1)
+    if fmt not in FORMATS:
+        typer.echo(f"不支持的格式 {fmt!r}；可用: {', '.join(sorted(FORMATS))}", err=True)
+        raise typer.Exit(1)
+
+    spec = SongSpec.from_toml(path)
+    song = spec.to_song() if no_arrange else arrange(spec)
+    base = _slug(song.title or path.parent.name)
+    out_dir = Path(out) if out is not None else Path("out") / base
+
+    cfg = _load_config(ctx)
+    merged = cfg.merge_cli(soundfont=soundfont, fluidsynth=fluidsynth)
+    resolver = PathResolver(merged)
+    if dry_run:
+        sf_path, fs_path = merged.paths.soundfont, merged.paths.fluidsynth
+    else:
+        resolver.ensure_ready()
+        sf_path, fs_path = resolver.resolve_soundfont(), resolver.resolve_fluidsynth()
+
+    backend = FluidSynthBackend(str(fs_path))
+    options = RenderOptions(
+        sample_rate=sample_rate,
+        fmt=fmt,
+        stems=stems,
+        normalize=not no_normalize,
+        dry_run=dry_run,
+    )
+    result = render_song(song, out_dir=out_dir, backend=backend, soundfont=str(sf_path),
+                         options=options)
+
+    prefix = "[dry-run] " if dry_run else ""
+    if dry_run:
+        typer.echo(f"{prefix}计划渲染 {len(song.tracks)} 轨 → {out_dir}")
+        typer.echo(f"  {backend_summary(backend)}")
+    for line in describe_result(result):
         typer.echo(f"  {line}")
