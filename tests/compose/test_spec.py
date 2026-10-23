@@ -607,3 +607,20 @@ class TestNotesAndChannels:
         assert payload["song"]["pickup_beats"] == 1.0
         assert payload["song"]["bars"] == 4
         assert payload["tempo"] == [{"beat": 0, "bpm": 96, "curve": "step"}]
+
+
+class TestChordValidation:
+    def test_unparseable_chord(self) -> None:
+        data = _spec_dict()
+        data["section"][0]["progression"] = ["Dm", "H7"]
+        _raises(data, "/section/0/progression/1", ARRANGEMENT_ERROR, "无法解析音名")
+
+    def test_chord_with_bad_quality(self) -> None:
+        data = _spec_dict()
+        data["section"][0]["progression"] = ["Cadd9"]
+        _raises(data, "/section/0/progression/0", ARRANGEMENT_ERROR, "未知和弦性质")
+
+    def test_known_qualities_accepted(self) -> None:
+        data = _spec_dict()
+        data["section"][0]["progression"] = ["Dm7", "Bbmaj7", "F/A", "Dsus4"]
+        _parse_and_validate(data)

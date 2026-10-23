@@ -17,6 +17,7 @@ from typer.testing import CliRunner
 
 from sunoauxtool.aggregate import app as aggregate_app
 from sunoauxtool.cli import app as core_app
+from sunoauxtool.compose.arranger import arrange
 from sunoauxtool.compose.cli import app
 from sunoauxtool.compose.spec import SongSpec
 from sunoauxtool.midi.io import read_smf
@@ -74,13 +75,20 @@ class TestInit:
         assert path.exists()
         spec = SongSpec.from_toml(path)
         spec.validate()
-        assert spec.total_bars == 8
-        assert [track.role for track in spec.tracks] == ["harmony", "bass", "drums"]
+        assert spec.total_bars == 36
+        assert [track.role for track in spec.tracks] == [
+            "harmony", "harmony", "bass", "melody", "counter", "arpeggio", "drums", "pad",
+        ]
 
-    def test_template_has_notes(self, tmp_path: Path) -> None:
+    def test_template_is_arranger_driven(self, tmp_path: Path) -> None:
+        """模板不含手写音符：音符由 Arranger 按 energy 生成。"""
         spec = SongSpec.from_toml(_init(tmp_path))
-        assert sum(len(track.notes) for track in spec.tracks) == 64
-        assert spec.tracks[0].notes[0].pitch == 62
+        assert sum(len(track.notes) for track in spec.tracks) == 0
+        song = arrange(spec)
+        notes = sum(len(clip.notes) for track in song.tracks for clip in track.clips)
+        assert notes > 500
+        # 前奏能量最低：只有铺底在响，和弦轨被能量门控挡住
+        assert song.track_by_id("piano").clips[0].notes == []
 
     def test_title_option(self, tmp_path: Path) -> None:
         result = runner.invoke(
@@ -122,7 +130,7 @@ class TestValidate:
         payload = json.loads(result.output)
         assert result.exit_code == 0
         assert payload["ok"] is True
-        assert payload["summary"]["bars"] == 8
+        assert payload["summary"]["bars"] == 36
 
     def test_missing_file(self, tmp_path: Path) -> None:
         result = runner.invoke(app, ["validate", str(tmp_path / "nope.toml")])
@@ -173,10 +181,15 @@ class TestBuild:
         document = read_smf(target / "night.mid")
         assert [(track.name, track.channel, track.program, track.is_drum)
                 for track in document.tracks] == [
-            ("钢琴", 0, 0, False), ("贝斯", 1, 33, False), ("鼓组", 9, 0, True),
+            ("钢琴", 0, 0, False), ("电钢琴", 1, 4, False), ("贝斯", 2, 33, False),
+            ("主奏旋律", 3, 73, False), ("双簧管对位", 4, 68, False),
+            ("竖琴琶音", 5, 46, False), ("鼓组", 9, 0, True), ("弦乐铺底", 6, 89, False),
         ]
         assert [point.bpm for point in document.tempo_map] == [96.0]
-        assert document.markers == [(0.0, "主歌"), (16.0, "副歌")]
+        assert document.markers == [
+            (0.0, "前奏"), (16.0, "主歌"), (48.0, "副歌"),
+            (80.0, "间奏"), (96.0, "副歌再现"), (128.0, "尾奏"),
+        ]
         assert "通道分配" in result.output
 
     def test_snapshot_matches_song(self, tmp_path: Path) -> None:
@@ -185,8 +198,10 @@ class TestBuild:
         runner.invoke(app, ["build", str(path), "-o", str(target)])
         snapshot = json.loads((target / "arrangement.json").read_text(encoding="utf-8"))
         assert snapshot["schema_version"] == 1
-        assert [section["id"] for section in snapshot["sections"]] == ["verse", "chorus"]
-        assert len(snapshot["tracks"]) == 3
+        assert [section["id"] for section in snapshot["sections"]] == [
+            "intro", "verse", "chorus", "bridge", "final", "outro",
+        ]
+        assert len(snapshot["tracks"]) == 8
 
     def test_dry_run_writes_nothing(self, tmp_path: Path) -> None:
         path = _init(tmp_path)
@@ -238,3 +253,16 @@ def test_slug_is_filesystem_safe(tmp_path: Path, name: str) -> None:
     produced = list((tmp_path / "out").glob("*.mid"))
     assert len(produced) == 1
     assert "/" not in produced[0].name
+
+
+def test_toml_value_covers_scalars() -> None:
+    """模板渲染器覆盖 bool/数值/字符串/数组/内联表。"""
+    from sunoauxtool.compose.cli import _toml_value
+
+    assert _toml_value(True) == "true"
+    assert _toml_value(False) == "false"
+    assert _toml_value(96) == "96"
+    assert _toml_value(-6.5) == "-6.5"
+    assert _toml_value("夜航") == '"夜航"'
+    assert _toml_value([1, 2]) == "[1, 2]"
+    assert _toml_value({"gain_db": -3.0}) == "{ gain_db = -3 }"

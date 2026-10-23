@@ -656,15 +656,18 @@ CI 注意：音频渲染用 2 小节短 fixture；SF2 走 LFS，checkout 后 `gi
 > **进度**（按 PR 逐项落地，`[~]` = 部分达成，括号内为剩余工作）
 > - PR-A `midi/`（1351f51）：SMF 全保真读写 + 通道分配；68 例。
 > - PR-B `compose/song.py`（68ff64f）：`Song` 编曲模型 + 旧模型适配器；71 例。
-> - PR-C `compose/{spec,api,cli}.py`（本阶段）：清单/DSL/`compose init|validate|build`；121 例。
+> - PR-C `compose/{spec,api,cli}.py`（0f9c851）：清单/DSL/`compose init|validate|build`；121 例。
 >   顺带修正弱起网格锚点（`_is_bar_boundary` 以 `pickup_beats` 为锚）。
+> - PR-D `compose/{arranger,harmony,melody,rhythm,orchestration,humanize,rng}.py`（本阶段）：
+>   能量→角色矩阵、动机发展与终止式、7 套 groove、blake2b 种子隔离、人性化；243 例。
 
 - [x] `midi/` 包：SMF type 1 往返测试全绿（含 3 点速度表、拍号变化、CC、鼓轨）。
 - [x] `Song.validate()` 覆盖 6 类不变量，错误码 40 可读。
-- [~] `compose build`：TOML → MIDI + `arrangement.json`，`--dry-run` 无产物 —— 已通（显式音符路径）；
-      8 轨待 PR-D Arranger 自动生成。
+- [x] `compose build`：TOML → 8 轨 MIDI + `arrangement.json`，`--dry-run` 无产物
+      （PR-D 起 `compose init` 模板即 8 轨 6 段，Arranger 生成 885 音符 / 90 秒）。
 - [ ] `compose render --stems`：8 stems + mix；空测 ≤ −60 dBFS。（PR-E）
-- [~] 确定性：同清单两次构建 sha256 一致已测；seed 派生影响隔离待 PR-D。
+- [x] 确定性：同 seed 构建 sha256 一致；改单轨 density 不影响他轨；增删轨道不改变他轨
+      （PR-D 起由 `(seed, section, track, role)` 派生独立 RNG）。
 - [ ] `score --full`：分谱组/移调/大谱表/分页；MusicXML 校验通过。（PR-F）
 - [x] 旧命令回归：`generate midi`/`pipeline`/`render` 输出与 1.9.1 一致（根套件全绿）。
 - [~] 错误码 40–45：40/44/45 已注册；41/42/43 随 PR-E/G 注册。

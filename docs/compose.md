@@ -1,7 +1,7 @@
 # compose：代码驱动的多轨编曲（2.0）
 
-> 状态：**2.0 PR-C 已交付**（清单解析 + Python DSL + `compose init/validate/build`）。
-> 编曲引擎（Arranger，按角色自动生成音符）、分轨渲染与总谱 v2 在 PR-D/E/F 接入。
+> 状态：**2.0 PR-D 已交付**（清单解析 + DSL + Arranger 自动编曲 + `compose init/validate/build`）。
+> 分轨渲染（`compose render --stems`）与总谱 v2 在 PR-E/F 接入。
 
 `compose` 是"数字轴"入口：一份 `song.toml`（或 Python DSL）完整描述一首曲子，
 构建出**全保真 MIDI**（format 1，含速度表/拍号/调性/CC/音色库）与**编排快照**，
@@ -10,19 +10,22 @@
 ## 1. 三个命令
 
 ```bash
-sunoaux compose init night                 # 生成 night/song.toml（8 小节三轨模板，可直接构建）
+sunoaux compose init night                 # 生成 night/song.toml（8 轨 6 段模板，可直接构建）
 sunoaux compose validate night/song.toml   # 校验；--json 给机器读
 sunoaux compose build  night/song.toml     # -> out/night/night.mid + arrangement.json
 ```
 
 | 命令 | 关键选项 | 产物 |
 |---|---|---|
-| `init` | `--out/-o DIR`、`--title`、`--force` | `DIR/song.toml`（模板自带 64 个音符，`init` 时自检一遍） |
+| `init` | `--out/-o DIR`、`--title`、`--force` | `DIR/song.toml`（8 轨 6 段 / 36 小节；`init` 会立刻编排一遍自检） |
 | `validate` | `--json` | 摘要（曲名/调性/速度/段落/轨道/音符/时长）或结构化错误 |
-| `build` | `--out/-o DIR`、`--dry-run` | `<曲名>.mid` + `arrangement.json`；`--dry-run` 只打印通道分配与产物路径 |
+| `build` | `--out/-o DIR`、`--dry-run`、`--no-arrange`、`--no-humanize` | `<曲名>.mid` + `arrangement.json`；`--dry-run` 只打印通道分配与产物路径 |
 
-`compose build` 只产 MIDI/谱面素材；**音频渲染**（`compose render --stems`）在 PR-E 落地，
-总谱 v2（分谱组/移调/大谱页）在 PR-F 落地。
+只写 `[[section]]` + `[[track]]` 的 `role` 就够了：`compose build` 会先跑 **Arranger** 自动生成音符。
+手写 `[[track.note]]` 的轨道不受 Arranger 影响（**显式优先**，可混用）。
+`--no-arrange` 关闭自动编排，`--no-humanize` 关掉力度/微时序抖动（严格对齐网格）。
+
+**音频渲染**（`compose render --stems`）在 PR-E 落地，总谱 v2（分谱组/移调/大谱页）在 PR-F 落地。
 
 ## 2. `song.toml` 契约
 
@@ -110,7 +113,43 @@ song = (
 DSL 只做"收集"，编译成与 TOML **同构**的 `SongSpec`，因此两种写法能力与报错一致；
 `SongBuilder.to_dict()` 可直接 `json.dump` 成清单再交给 AI 或版本管理。
 
-## 5. 与旧命令的关系
+## 5. Arranger：能量驱动的自动编曲
+
+`compose build` 对"一个音符都没有"的轨道按 **段落能量 × 角色** 生成音符：
+
+| 段落 energy | 参与角色 | 听感 |
+|---|---|---|
+| 0.00–0.30 | `pad` | 长音铺底，动机留白（前奏常用） |
+| 0.30–0.60 | `harmony` `bass` `drums` | 和弦块状 + 根音贝斯 + 基础律动 |
+| 0.60–0.85 | + `melody` | 加入有动机发展的主旋律 |
+| 0.85–1.00 | + `counter` `arpeggio` | 对位声部、琶音、打击式和弦、加花 fill |
+
+角色分工：
+
+| 角色 | 生成策略 | 默认 GM 音色 | 默认音域 |
+|---|---|---|---|
+| `melody` | 动机 + 发展算子（重复/模进/倒影/逆行）+ 末句终止式 | 73 Flute | 60–84 |
+| `counter` | 对主旋律做倒影/移位，避开同度撞音；无旋律时独立生成 | 68 Oboe | 55–79 |
+| `harmony` | 每小节一次密集排列（`voice_chord` 平滑声部连接），高能量拆成打击式和弦 | 0 Piano | 48–72 |
+| `arpeggio` | 八分音符上行循环和弦音 | 46 Harp | 55–84 |
+| `pad` | 每小节一个长音和弦 | 89 Warm Pad | 48–76 |
+| `bass` | 每小节根音（含转位低音）；能量 ≥0.55 加半拍推进、≥0.8 加五度 | 33 Finger Bass | 28–52 |
+| `drums` | groove 图案 + 首拍 crash + 末小节 fill | 打击乐通道 9 | — |
+| `percussion` | 预留（暂无生成器，留空不报错） | 47 Timpani | 40–60 |
+
+鼓组 groove 名（`groove = "..."`）：`pop` / `rock` / `electronic` / `half_time` / `funk` /
+`waltz` / `ballad`；不写时按能量选（低→ballad，中→pop，高→rock，3/4 一律 waltz）。
+
+**确定性**（G8）：每条 `(段落, 轨道, 角色)` 用
+`blake2b(f"{seed}:{section}:{track}:{role}")` 派生独立 RNG，因此
+
+- 同清单 + 同 `seed` → MIDI 字节级一致（测试用 sha256 断言）；
+- 改某轨 `density` 只影响该轨；**增删轨道不改变已有轨道的音符**（可增量编辑）；
+- 换 `seed` → 旋律/律动换一版，结构与配器不变。
+
+人性化（`humanize`）：力度 ±6%、微时序 ±1.5% 拍（写在 `offset_ticks`，不破坏节拍网格）。
+
+## 6. 与旧命令的关系
 
 | 场景 | 用哪个 |
 |---|---|
@@ -120,11 +159,11 @@ DSL 只做"收集"，编译成与 TOML **同构**的 `SongSpec`，因此两种�
 
 旧命令在 2.0 全周期保留；`compose` 不改变它们的行为。
 
-## 6. 后续（按 PR 推进）
+## 7. 后续（按 PR 推进）
 
 | PR | 内容 | 用户可见变化 |
 |---|---|---|
-| D | Arranger v1（段落×角色矩阵、和声/旋律/鼓、blake2b 种子派生） | 清单只写 `role`/`energy` 就能生成音符 |
+| ~~D~~ | ~~Arranger v1~~ | 已交付：清单只写 `role`/`energy` 就能生成音符 |
 | E | 渲染 v2（多库、stems、混音） | `compose render --stems` → mix.wav + stems/ |
 | F | 总谱 v2（Part/移调/大谱表/分页） | `compose build --score svg,musicxml` |
 | G | SoundBank 注册表 | `soundbank list/info/verify`，每轨独立选库 |

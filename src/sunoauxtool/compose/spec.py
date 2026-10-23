@@ -50,6 +50,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Iterable, Sequence
 
+from sunoauxtool.compose.harmony import parse_chord
 from sunoauxtool.compose.song import (
     KNOWN_ROLES,
     Clip,
@@ -431,6 +432,12 @@ class SongSpec:
                 if not chord.strip():
                     raise SpecError(f"{path}/progression/{chord_index}", "和弦不能为空",
                                     ARRANGEMENT_ERROR)
+                try:
+                    parse_chord(chord)
+                except ParameterError as exc:
+                    raise SpecError(
+                        f"{path}/progression/{chord_index}", str(exc), ARRANGEMENT_ERROR
+                    ) from exc
         return seen
 
     def _validate_tracks(self, section_ids: Sequence[str]) -> None:

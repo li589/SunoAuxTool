@@ -1,9 +1,10 @@
-"""compose 子命令：清单 → MIDI/编排快照（2.0 PR-C）。
+"""compose 子命令：清单 → 编排 → MIDI/编排快照（2.0 PR-C/D）。
 
 子命令：
-    compose init      生成可构建的 song.toml 模板 + 目录骨架
+    compose init      生成可直接构建的 song.toml 模板（8 轨 6 段，约 90 秒）
     compose validate  校验清单（结构 44 / 语义 40，错误带 JSON Pointer）
-    compose build     song.toml → <name>.mid + arrangement.json（`--dry-run` 只打印计划）
+    compose build     song.toml → Arranger 编排 → <name>.mid + arrangement.json
+                      `--dry-run` 只打印计划；`--no-arrange` 只用手写音符
 
 `compose render`（音频/stems）随 2.0 PR-E 落地，`compose score` 随 PR-F 落地。
 """
@@ -17,6 +18,8 @@ from typing import Optional
 import typer
 
 from sunoauxtool.commands.helpers import _guard
+from sunoauxtool.compose.arranger import ArrangeOptions, arrange
+from sunoauxtool.compose.song import Song
 from sunoauxtool.compose.spec import SpecError, SongSpec
 from sunoauxtool.logging_setup import get_logger
 from sunoauxtool.midi.io import write_smf
@@ -24,7 +27,7 @@ from sunoauxtool.midi.io import write_smf
 logger = get_logger("compose.cli")
 
 app = typer.Typer(
-    help="代码驱动编曲：song.toml → MIDI + 编排快照（数字轴入口）",
+    help="代码驱动编曲：song.toml → 编排 → MIDI + 编排快照（数字轴入口）",
     no_args_is_help=True,
     add_completion=False,
 )
@@ -33,6 +36,41 @@ app = typer.Typer(
 _UNSAFE = re.compile(r'[\\/:*?"<>|\s]+')
 
 _DRUM_CHANNEL = 9
+
+#: ``compose init`` 模板的段落表：(id, 中文名, 小节数, 能量, 和弦进行)
+TEMPLATE_SECTIONS: tuple[tuple[str, str, int, float, tuple[str, ...]], ...] = (
+    ("intro", "前奏", 4, 0.20, ("Dm", "Bb", "F", "C")),
+    ("verse", "主歌", 8, 0.45, ("Dm", "Bb", "F", "C")),
+    ("chorus", "副歌", 8, 0.90, ("Bb", "C", "Dm", "Dm")),
+    ("bridge", "间奏", 4, 0.35, ("Gm", "Am")),
+    ("final", "副歌再现", 8, 0.95, ("Bb", "C", "Dm", "Dm")),
+    ("outro", "尾奏", 4, 0.25, ("Bb", "C", "Dm", "Dm")),
+)
+
+#: ``compose init`` 模板的轨道表（role 决定生成策略，mix 决定混音；8 轨）
+TEMPLATE_TRACKS: tuple[dict, ...] = (
+    {"id": "piano", "name": "钢琴", "role": "harmony", "program": 0,
+     "sections": ("intro", "verse", "chorus", "bridge", "final", "outro"),
+     "mix": {"gain_db": -6.0, "pan": -0.15, "reverb_send": 0.18}},
+    {"id": "epiano", "name": "电钢琴", "role": "harmony", "program": 4, "octave": 5,
+     "sections": ("chorus", "final"), "density": 0.4,
+     "mix": {"gain_db": -14.0, "pan": 0.25}},
+    {"id": "bass", "name": "贝斯", "role": "bass", "program": 33,
+     "sections": ("verse", "chorus", "bridge", "final"),
+     "mix": {"gain_db": -3.0}},
+    {"id": "lead", "name": "主奏旋律", "role": "melody", "density": 0.6,
+     "sections": ("verse", "chorus", "final")},
+    {"id": "oboe", "name": "双簧管对位", "role": "counter",
+     "sections": ("final",), "mix": {"gain_db": -8.0, "pan": 0.35}},
+    {"id": "harp", "name": "竖琴琶音", "role": "arpeggio",
+     "sections": ("chorus", "final"), "mix": {"gain_db": -9.0, "pan": -0.3}},
+    {"id": "drums", "name": "鼓组", "role": "drums", "channel": _DRUM_CHANNEL,
+     "groove": "pop", "sections": ("verse", "chorus", "final"),
+     "mix": {"gain_db": -4.0}},
+    {"id": "strings", "name": "弦乐铺底", "role": "pad",
+     "sections": ("intro", "outro"),
+     "mix": {"gain_db": -10.0, "pan": 0.2, "reverb_send": 0.35}},
+)
 
 
 # ---------------------------------------------------------------------------
@@ -50,22 +88,26 @@ def _toml_string(value: str) -> str:
     return '"' + str(value).replace("\\", "\\\\").replace('"', '\\"') + '"'
 
 
-def _note_block(beat: float, pitch: int, duration: float, velocity: int = 72) -> list[str]:
-    return [
-        "[[track.note]]",
-        f"beat = {beat:g}",
-        f"pitch = {pitch}",
-        f"duration = {duration:g}",
-        f"velocity = {velocity}",
-        "",
-    ]
+def _toml_value(value: object) -> str:
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    if isinstance(value, (int, float)):
+        return f"{value:g}"
+    if isinstance(value, (list, tuple)):
+        return "[" + ", ".join(_toml_value(item) for item in value) + "]"
+    if isinstance(value, dict):
+        return "{ " + ", ".join(f"{key} = {_toml_value(item)}"
+                                for key, item in value.items()) + " }"
+    return _toml_string(str(value))
 
 
 def _template(title: str) -> str:
-    """生成 8 小节（主歌 4 + 副歌 4）三轨的可构建模板。"""
+    """生成可直接构建的模板（8 轨 6 段；音符全部由 Arranger 生成）。"""
     lines = [
         "# SunoAuxTool 2.0 编曲清单（song.toml）",
-        "# 音符 beat 为全曲绝对拍：4/4 下 1 小节 = 4 拍",
+        "# 只需写段落 + 角色，compose build 时由 Arranger 按 energy 生成音符；",
+        "# 想手写音符可加 [[track.note]]（beat 为全曲绝对拍：4/4 下 1 小节 = 4 拍），",
+        "# 有显式音符的轨道不再自动生成。",
         "schema = 1",
         "",
         "[song]",
@@ -75,87 +117,54 @@ def _template(title: str) -> str:
         'meter = "4/4"',
         "seed = 20261024",
         "",
-        "[[section]]",
-        'id = "verse"',
-        'name = "主歌"',
-        "bars = 4",
-        "energy = 0.45",
-        'progression = ["Dm", "Bb", "F", "C"]',
-        "",
-        "[[section]]",
-        'id = "chorus"',
-        'name = "副歌"',
-        "bars = 4",
-        "energy = 0.85",
-        'progression = ["Bb", "C", "Dm", "Dm"]',
-        "",
-        "# ---- 钢琴：每小节柱式和弦 -------------------------------------------",
-        "[[track]]",
-        'id = "piano"',
-        'name = "钢琴"',
-        'role = "harmony"',
-        "program = 0",
-        'sections = ["verse", "chorus"]',
-        "mix = { gain_db = -6.0, pan = -0.15, reverb_send = 0.18 }",
-        "",
+        "# ---- 段落：energy 决定配器密度（0.0-0.3 铺底 / 0.3-0.6 节奏组 /"
+        " 0.6-0.85 加旋律 / 0.85+ 加对位与琶音）----",
     ]
-    # 每小节一个三和弦（根音上 3 音），副歌整体上移八度增强
-    chords = [
-        (0.0, (62, 65, 69)), (4.0, (58, 62, 65)), (8.0, (57, 60, 65)), (12.0, (55, 60, 64)),
-        (16.0, (70, 74, 77)), (20.0, (72, 74, 79)), (24.0, (74, 77, 81)), (28.0, (74, 77, 81)),
-    ]
-    for beat, pitches in chords:
-        for pitch in pitches:
-            lines += _note_block(beat, pitch, 3.5, 76)
+    for section_id, name, bars, energy, progression in TEMPLATE_SECTIONS:
+        lines += [
+            "[[section]]",
+            f'id = "{section_id}"',
+            f"name = {_toml_string(name)}",
+            f"bars = {bars}",
+            f"energy = {energy:g}",
+            f"progression = {_toml_value(list(progression))}",
+            "",
+        ]
 
-    lines += [
-        "# ---- 贝斯：每小节根音 -----------------------------------------------",
-        "[[track]]",
-        'id = "bass"',
-        'name = "贝斯"',
-        'role = "bass"',
-        "program = 33",
-        "octave = 2",
-        'sections = ["verse", "chorus"]',
-        "mix = { gain_db = -3.0 }",
-        "",
-    ]
-    roots = [(0.0, 38), (4.0, 34), (8.0, 41), (12.0, 36),
-             (16.0, 34), (20.0, 36), (24.0, 38), (28.0, 38)]
-    for beat, pitch in roots:
-        lines += _note_block(beat, pitch, 3.8, 84)
-
-    lines += [
-        "# ---- 鼓组：固定通道 9（role = \"drums\" 自动占用）---------------------",
-        "[[track]]",
-        'id = "drums"',
-        'name = "鼓组"',
-        'role = "drums"',
-        'instrument = "standard_kit"',
-        f"channel = {_DRUM_CHANNEL}",
-        'sections = ["verse", "chorus"]',
-        "mix = { gain_db = -4.0 }",
-        "",
-    ]
-    for bar in range(8):
-        base = bar * 4.0
-        lines += _note_block(base, 36, 0.5, 100)       # 底鼓
-        lines += _note_block(base + 2.0, 38, 0.5, 92)  # 军鼓
-        lines += _note_block(base + 1.0, 42, 0.5, 64)  # 闭镲
-        lines += _note_block(base + 3.0, 42, 0.5, 64)  # 闭镲
+    lines.append("# ---- 轨道：role 决定生成策略，program 决定 GM 音色 ----")
+    for track in TEMPLATE_TRACKS:
+        lines.append("[[track]]")
+        for key, value in track.items():
+            if key == "sections":
+                lines.append(f"sections = {_toml_value(list(value))}")
+            else:
+                lines.append(f"{key} = {_toml_value(value)}")
+        lines.append("")
     return "\n".join(lines).rstrip() + "\n"
 
 
-def _describe(spec: SongSpec) -> list[str]:
+def _describe(spec: SongSpec, song: Song | None = None) -> list[str]:
     """人类可读摘要（validate / build 共用）。"""
-    summary = spec.summary()
-    return [
-        f"曲名 {summary['title'] or '(未命名)'}｜调性 {summary['key']}｜"
-        f"速度 {summary['tempo']:g} BPM｜拍号 {summary['meter']}",
-        f"段落 {summary['sections']} 个 / {summary['bars']} 小节｜"
-        f"轨道 {summary['tracks']} 条｜音符 {summary['notes']} 个",
-        f"时长 {summary['duration_beats']:g} 拍 = {summary['duration_seconds']:.2f} 秒",
+    notes = sum(len(clip.notes) for track in song.tracks for clip in track.clips) \
+        if song is not None else sum(len(track.notes) for track in spec.tracks)
+    bars = spec.total_bars
+    duration = song.duration_beats if song is not None else spec.total_bars * spec.bar_length()
+    seconds = song.duration_seconds() if song is not None else 0.0
+    line = (
+        f"曲名 {spec.title or '(未命名)'}｜调性 {spec.key}｜"
+        f"速度 {spec.tempo:g} BPM｜拍号 {spec.meter}"
+    )
+    result = [
+        line,
+        f"段落 {len(spec.sections)} 个 / {bars} 小节｜"
+        f"轨道 {len(spec.tracks)} 条｜音符 {notes} 个",
     ]
+    if song is not None:
+        result.append(f"时长 {duration:g} 拍 = {seconds:.2f} 秒")
+    else:
+        result.append("（validate 不生成音符；build 时由 Arranger 按 energy 生成）"
+                      if notes == 0 else f"时长 {duration:g} 拍")
+    return result
 
 
 # ---------------------------------------------------------------------------
@@ -172,7 +181,7 @@ def init(
     title: Optional[str] = typer.Option(None, "--title", help="曲名（默认同工程名）"),
     force: bool = typer.Option(False, "--force", help="覆盖已存在的 song.toml"),
 ) -> None:
-    """生成可构建的 song.toml 模板（8 小节、钢琴/贝斯/鼓三轨）。"""
+    """生成 song.toml 模板（8 轨 6 段，写完立刻编排一遍自检）。"""
     target_dir = Path(out) if out is not None else Path(name)
     target = target_dir / "song.toml"
     if target.exists() and not force:
@@ -181,9 +190,10 @@ def init(
     target_dir.mkdir(parents=True, exist_ok=True)
     target.write_text(_template(title or name), encoding="utf-8")
 
-    spec = SongSpec.from_toml(target)  # 自检：模板必须能过校验
+    spec = SongSpec.from_toml(target)
+    song = arrange(spec)  # 自检：模板必须能编排出来
     typer.echo(f"已生成 {target}")
-    for line in _describe(spec):
+    for line in _describe(spec, song):
         typer.echo(f"  {line}")
     typer.echo(f"  下一步：sunoaux compose build {target}")
 
@@ -223,6 +233,12 @@ def build(
         None, "--out", "-o", help="输出目录（默认 out/<曲名>/）"
     ),
     dry_run: bool = typer.Option(False, "--dry-run", help="只打印计划，不写文件"),
+    no_arrange: bool = typer.Option(
+        False, "--no-arrange", help="不做自动编排（只用清单里的[[track.note]]）"
+    ),
+    no_humanize: bool = typer.Option(
+        False, "--no-humanize", help="关闭力度/时序抖动（严格对齐网格）"
+    ),
 ) -> None:
     """构建成品 MIDI（format 1）+ 编排快照（arrangement.json）。"""
     if not path.exists():
@@ -230,7 +246,8 @@ def build(
         raise typer.Exit(1)
 
     spec = SongSpec.from_toml(path)
-    song = spec.to_song()
+    options = ArrangeOptions(humanize=not no_humanize)
+    song = spec.to_song() if no_arrange else arrange(spec, options)
     document = song.to_midi()
 
     base = _slug(song.title or path.parent.name)
@@ -238,11 +255,10 @@ def build(
     midi_path = out_dir / f"{base}.mid"
     snapshot_path = out_dir / "arrangement.json"
 
-    channels = "、".join(
-        f"{track.name}={track.channel}" for track in document.tracks
-    ) or "（无轨道）"
+    channels = "、".join(f"{track.name}={track.channel}" for track in document.tracks) \
+        or "（无轨道）"
     plan = [
-        *_describe(spec),
+        *_describe(spec, song),
         f"通道分配 {channels}",
         f"输出 {midi_path}｜{snapshot_path}",
     ]
