@@ -236,6 +236,8 @@ class MidiDocumentV2:
         markers: 段落标记（beat, text），写入 meta marker。
         ppq: 每拍 tick 数（新建默认 960；读入时保留文件原值）。
         title: 曲名（写入指挥轨 track_name）。
+        end_beat: 编排层声明的全曲长度（拍）。缺省 ``None`` 表示按内容推断；
+            用于"尾部静音/无音符"的段落必须占足长度（如分轨渲染对齐）。
     """
 
     tracks: list[MidiTrackV2] = field(default_factory=list)
@@ -252,6 +254,7 @@ class MidiDocumentV2:
     raw_events: list[RawEvent] = field(default_factory=list)
     ppq: int = 960
     title: str = ""
+    end_beat: float | None = None
 
     # -- 校验与度量 -------------------------------------------------------
 
@@ -279,12 +282,18 @@ class MidiDocumentV2:
             raise ParameterError("一条曲子最多允许一条鼓轨（通道 9）")
         for beat, _text in self.markers:
             _require_finite(beat, "marker.beat")
+        if self.end_beat is not None:
+            _require_finite(self.end_beat, "end_beat")
+            if self.end_beat < 0:
+                raise ParameterError(f"end_beat 不能为负: {self.end_beat}")
 
     @property
     def duration_beats(self) -> float:
-        """全曲结束拍（取轨道/标记最大值）。"""
+        """全曲结束拍（取轨道/标记/显式 end_beat 的最大值）。"""
         ends = [track.end_beat for track in self.tracks]
         ends.extend(beat for beat, _ in self.markers)
+        if self.end_beat is not None:
+            ends.append(self.end_beat)
         return max(ends, default=0.0)
 
     def duration_seconds(self) -> float:

@@ -197,3 +197,26 @@ class TestDocument:
         doc = MidiDocumentV2(tracks=[track])
         assert doc.track_by_channel(3) is track
         assert doc.track_by_channel(4) is None
+
+    def test_end_beat_extends_duration(self) -> None:
+        """尾部静音（段落无音符）靠 end_beat 保住长度。"""
+        doc = MidiDocumentV2(
+            tracks=[MidiTrackV2(name="x", channel=0, notes=[NoteEvent(60, 0, 4)])],
+            end_beat=16.0,
+        )
+        doc.validate()
+        assert doc.duration_beats == 16.0
+        assert doc.duration_seconds() == pytest.approx(8.0)  # 120 BPM
+
+    def test_end_beat_cannot_shrink_duration(self) -> None:
+        doc = MidiDocumentV2(
+            tracks=[MidiTrackV2(name="x", channel=0, notes=[NoteEvent(60, 0, 8)])],
+            end_beat=2.0,
+        )
+        assert doc.duration_beats == 8.0
+
+    def test_end_beat_validation(self) -> None:
+        with pytest.raises(ParameterError, match="不能为负"):
+            MidiDocumentV2(end_beat=-1.0).validate()
+        with pytest.raises(ParameterError, match="有限数值"):
+            MidiDocumentV2(end_beat=float("inf")).validate()
