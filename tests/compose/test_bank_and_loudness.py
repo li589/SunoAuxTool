@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 import numpy as np
@@ -29,6 +30,10 @@ from sunoauxtool.soundbank.registry import MIN_BYTES
 
 runner = CliRunner()
 SR = 44100
+
+#: Linux CI 下 rich/typer 会开色，选项名还被 OptionHighlighter 拆成 "-"+"-bank"
+#: 两段上色 —— 断言 help 文本前必须先剥 ANSI（1.9.1 起的老坑）
+_ANSI_RE = re.compile(chr(27) + r"\[[0-9;]*m")
 
 
 # ---------------------------------------------------------------------------
@@ -341,6 +346,6 @@ role = "harmony"{bank_line}
         assert "dry-run" in result.output
 
     def test_help_mentions_bank_and_align(self) -> None:
-        output = runner.invoke(app, ["render", "--help"]).output
-        assert "--bank" in output
-        assert "--no-align-loudness" in output
+        plain = _ANSI_RE.sub("", runner.invoke(app, ["render", "--help"]).output)
+        assert "--bank" in plain
+        assert "--no-align-loudness" in plain
