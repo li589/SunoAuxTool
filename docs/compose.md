@@ -1,6 +1,6 @@
 # compose：代码驱动的多轨编曲（2.0）
 
-> 状态：**2.0 PR-G 已交付**（清单 + DSL + Arranger + 分轨渲染/混音 + 总谱/分谱 + 音源注册表）。
+> 状态：**2.1.0 已交付**（2.0 全部能力 + 每轨独立选音源库 + 跨库响度对齐）。
 > 命令面：`compose init / validate / build / render / score` + `soundbank list / info / verify`。
 
 `compose` 是"数字轴"入口：一份 `song.toml`（或 Python DSL）完整描述一首曲子，
@@ -33,6 +33,8 @@ sunoaux compose score  night/song.toml --format svg,musicxml --parts
 | `--format wav / flac` | 混音成品格式（**分轨恒为 WAV**：fluidsynth 只写 wav） |
 | `--sample-rate` | 采样率（默认 44100） |
 | `--no-normalize` | 不做峰值归一（默认归一到 −0.5 dBFS） |
+| `--bank <id或路径>` | 全曲统一音源库（覆盖清单里每轨的 `bank`） |
+| `--no-align-loudness` | 关闭跨音源库响度对齐 |
 | `--no-arrange` | 不做自动编排（只用清单里的音符） |
 | `--dry-run` | 只打印计划（含后端能力），不写任何文件 |
 
@@ -189,6 +191,29 @@ Song ─按轨切 MIDI→ midi/<id>.mid ─backend.render→ stems/<id>.wav
 `FluidSynthBackend` 只是它的一个实现（旧 `FluidSynthRenderer` 一行未改）。
 错误码 42（后端不可用）/43（分轨或混音失败）。
 
+### 6.1 每轨独立选音源库（2.1）
+
+```toml
+[[track]]
+id = "harp"
+role = "arpeggio"
+bank = "colombogmgs2"   # 音源库 id（soundbank list 第一列）；省略/写 gm/default → 用配置默认
+```
+
+- 解析顺序：`--bank` 全局覆盖 > 清单 `bank` > 配置默认音源；
+- 未注册或校验失败 → **错误码 41**（报错里列出已注册 id）；
+- 每轨单独渲染 → 每个 stem 用自己那套库 → 混音仍是线性叠加，语义不变。
+
+**跨库响度对齐**：不同音源库同一 GM 音色的电平能差 10 dB 以上；不校正的话"换库"会变成
+"换音量"。做法是**按库对齐**而不是"每轨拉平"：
+
+1. 按 `bank` 把轨道分组，取每组实测 LUFS 的中位数作为该库电平；
+2. 以默认音源为基准，算出每个库需要补的 dB（限幅 ±12 dB）；
+3. 同库下所有轨道补同样 dB —— 库内平衡与 `mix.gain_db` 的意图完全保留。
+
+实测（模板 8 轨，竖琴换 Colombo 260MB 库）：`跨库响度对齐：最大修正 +9.8 dB（harp）`。
+单库工程恒为 0 修正（没有可比较对象），`--no-align-loudness` 可关闭。
+
 > 环境提示：fluidsynth 与音色库不在 PATH 时，用
 > `--fluidsynth module/fluidsynth/bin/fluidsynth.exe --soundfont module/GeneralUser_GS/GeneralUser-GS/GeneralUser-GS.sf2`。
 
@@ -235,6 +260,8 @@ sunoaux soundbank verify --all         # 批量结构校验；有失败则退出
   `.sfz` 检查是否有 `<region>/<group>`。真正的"能不能发声"由渲染阶段暴露（错误码 4/7）。
 - **id 规则**：文件名 slug 化（`GeneralUser-GS` → `generaluser-gs`）；
   同名不同文件时自动追加父目录名（`gm-x` / `gm-y`），保证扫描结果确定。
+- **扫描根**：`SUNOAUX_MODULE_DIR`（显式指定时**只**认它）> 当前目录向上的项目根 >
+  安装包所在仓库根。只认 cwd 会让"在别的目录跑 `sunoaux compose render`"找不到音源库。
 - `doctor` 新增"音源库"一行：`✅ 2/2 套可用（colombogmgs2, generaluser-gs）`。
 - 错误码 **41**：未注册 id、文件缺失、体积异常、非 RIFF/sfbk 容器。
 
@@ -248,7 +275,7 @@ sunoaux soundbank verify --all         # 批量结构校验；有失败则退出
 
 旧命令在 2.0 全周期保留；`compose` 不改变它们的行为。
 
-## 10. 后续（按 PR 推进）
+## 10. 后续（按里程碑推进）
 
 | PR | 内容 | 用户可见变化 |
 |---|---|---|
@@ -256,4 +283,7 @@ sunoaux soundbank verify --all         # 批量结构校验；有失败则退出
 | ~~E~~ | ~~渲染 v2（后端协议 / 分轨 / 混音）~~ | 已交付：`compose render` → mix + stems/ + midi/ |
 | ~~F~~ | ~~总谱 v2（移调 / 分谱组 / 分谱）~~ | 已交付：`compose score` → 总谱 + 分谱 |
 | F+ | 大谱表（钢琴两行）、分页、演奏记号 | 更接近出版级总谱 |
-| ~~G~~ | ~~SoundBank 注册表 + doctor~~ | 已交付：`soundbank list/info/verify`；**每轨独立选库**待 2.1 |
+| 2.2 | M3 表现力：演奏法/力度记号/摇摆进 MIDI 与总谱 | 更像"演奏"而不是"打谱" |
+| 2.3 | M4 AI 编曲：LLM 产出清单 → 校验 → 渲染闭环 | 自然语言到成品 |
+| ~~G~~ | ~~SoundBank 注册表 + doctor~~ | 已交付：`soundbank list/info/verify` |
+| ~~2.1~~ | ~~每轨独立选音源库 + 跨库响度对齐~~ | 已交付：`[[track]] bank`、`--bank`、按库对齐 |

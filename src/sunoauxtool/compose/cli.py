@@ -25,6 +25,7 @@ from sunoauxtool.compose.render import (
     backend_summary,
     describe_result,
     render_song,
+    resolve_banks,
 )
 from sunoauxtool.compose.score import (
     SCORE_FORMATS,
@@ -317,9 +318,16 @@ def render(
     no_arrange: bool = typer.Option(
         False, "--no-arrange", help="不做自动编排（只用清单里的 [[track.note]]）"
     ),
+    bank: Optional[str] = typer.Option(
+        None, "--bank", help="全曲统一音源库 id（覆盖清单里每轨的 bank）"
+    ),
+    no_align: bool = typer.Option(
+        False, "--no-align-loudness",
+        help="不做跨音源库响度对齐（换库后音量会不一致）",
+    ),
     dry_run: bool = typer.Option(False, "--dry-run", help="只打印计划，不写文件"),
 ) -> None:
-    """渲染成品音频：每轨独立渲染成分轨，再按混音通道条叠加。"""
+    """渲染成品音频：每轨独立渲染成分轨（可选独立音源库），再按混音通道条叠加。"""
     if not path.exists():
         typer.echo(f"清单不存在: {path}", err=True)
         raise typer.Exit(1)
@@ -341,6 +349,7 @@ def render(
         resolver.ensure_ready()
         sf_path, fs_path = resolver.resolve_soundfont(), resolver.resolve_fluidsynth()
 
+    bank_paths = resolve_banks(spec, default_soundfont=str(sf_path), override=bank)
     backend = FluidSynthBackend(str(fs_path))
     options = RenderOptions(
         sample_rate=sample_rate,
@@ -348,9 +357,10 @@ def render(
         stems=stems,
         normalize=not no_normalize,
         dry_run=dry_run,
+        align_loudness=not no_align,
     )
     result = render_song(song, out_dir=out_dir, backend=backend, soundfont=str(sf_path),
-                         options=options)
+                         options=options, bank_paths=bank_paths)
 
     prefix = "[dry-run] " if dry_run else ""
     if dry_run:

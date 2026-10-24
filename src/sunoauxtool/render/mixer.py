@@ -242,6 +242,117 @@ def mixdown(
                      gain=gain, stems=[strip.name for strip in active])
 
 
+def stem_loudness(path: Path, *, sample_rate: int | None = None) -> float | None:
+    """测一条分轨的积分响度（LUFS）；静音/过短返回 ``None``。"""
+    from sunoauxtool.dsp.loudness import integrated_lufs
+
+    try:
+        data, sr = sf.read(str(path), dtype="float32", always_2d=True)
+    except (RuntimeError, OSError) as exc:
+        logger.debug("跳过响度测量（%s）: %s", path.name, exc)
+        return None
+    if sample_rate is not None and sr != sample_rate:
+        return None
+    if not data.size:
+        return None
+    try:
+        return float(integrated_lufs(data, sr))
+    except ValueError:  # 静音 / 短于一个测量块
+        return None
+
+
+def align_loudness(
+    paths: dict[str, Path],
+    *,
+    target_lufs: float = -18.0,
+    max_db: float = 12.0,
+    sample_rate: int | None = None,
+) -> tuple[dict[str, float], dict[str, float]]:
+    """按响度把各分轨对齐到同一目标（音量补偿，单位 dB）。
+
+    不同音源库的同一 GM 音色响度能差 10 dB 以上；不校正的话"换库"会变成"换音量"。
+    这里只做**静态增益补偿**（不做压缩/限幅），并把修正限制在 ``±max_db`` 内，
+    避免把极安静的轨道抬成噪声墙。
+
+    Args:
+        paths: ``{轨道 id: 分轨路径}``。
+        target_lufs: 目标积分响度（默认 −18 LUFS，接近流行乐的"分轨响度"）。
+        max_db: 单轨最大修正量（dB）。
+        sample_rate: 期望采样率（不一致的分轨跳过）。
+
+    Returns:
+        ``({轨道: 测得 LUFS}, {轨道: 应用的 dB 修正})``；测不出的轨道不出现在结果里。
+    """
+    measured: dict[str, float] = {}
+    applied: dict[str, float] = {}
+    for name, path in paths.items():
+        lufs = stem_loudness(Path(path), sample_rate=sample_rate)
+        if lufs is None:
+            continue
+        measured[name] = lufs
+        delta = float(target_lufs) - lufs
+        applied[name] = max(-float(max_db), min(float(max_db), delta))
+    if measured:
+        logger.info(
+            "响度对齐到 %.1f LUFS：%d 轨参与（最大修正 %.1f dB）",
+            target_lufs, len(measured), max(abs(delta) for delta in applied.values()),
+        )
+    return measured, applied
+
+
+def align_banks(
+    measured: dict[str, float],
+    track_banks: dict[str, str],
+    *,
+    reference_bank: str = "",
+    max_db: float = 12.0,
+) -> dict[str, float]:
+    """按**音源库**对齐响度：换库不换音量，混音平衡不被动。
+
+    与"每轨拉到同一 LUFS"的区别很关键：把 pad 拉到和鼓一样响会毁掉编曲动态。
+    这里只补偿"同一内容由不同音源库渲染"造成的整体电平差：
+
+    1. 按 ``track_banks`` 把轨道分组，取每组实测 LUFS 的中位数当该库的电平；
+    2. 以 ``reference_bank``（默认音源库）为基准，算出每个库需要补的 dB；
+    3. 该库下所有轨道补同样的 dB（库内平衡不变，``MixStrip.gain_db`` 的意图仍成立）。
+
+    单库工程恒返回 0 修正（没有可对齐的对象）。
+
+    Args:
+        measured: ``{轨道 id: 实测 LUFS}``。
+        track_banks: ``{轨道 id: 音源库路径}``。
+        reference_bank: 基准库路径（通常是配置里的默认音源）；空则取最常用的库。
+        max_db: 单个库的最大修正量。
+
+    Returns:
+        ``{轨道 id: dB 修正}``（只含参与测量的轨道）。
+    """
+    groups: dict[str, list[float]] = {}
+    for name, lufs in measured.items():
+        bank = track_banks.get(name, "")
+        groups.setdefault(bank, []).append(lufs)
+    if len(groups) <= 1:
+        return {name: 0.0 for name in measured}
+
+    medians = {
+        bank: float(np.median(values)) for bank, values in groups.items()
+    }
+    reference = reference_bank if reference_bank in medians else max(
+        medians, key=lambda bank: len(groups[bank])
+    )
+    offset = medians[reference]
+    result: dict[str, float] = {}
+    for name in measured:
+        bank = track_banks.get(name, "")
+        delta = offset - medians[bank]
+        result[name] = max(-float(max_db), min(float(max_db), delta))
+    logger.info(
+        "音源库响度对齐：基准 %.1f LUFS（%d 个库，最大修正 %.1f dB）",
+        offset, len(medians), max(abs(value) for value in result.values()),
+    )
+    return result
+
+
 def strips_from_song(song, stems: dict[str, Path]) -> list[StemStrip]:
     """把 ``compose.Song`` 的通道条映射成 :class:`StemStrip`（缺 stem 的轨道跳过）。"""
     result: list[StemStrip] = []

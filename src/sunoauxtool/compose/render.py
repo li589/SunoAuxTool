@@ -28,8 +28,10 @@ from sunoauxtool.render.exceptions import MixdownError
 from sunoauxtool.render.mixer import (
     DEFAULT_TARGET_PEAK,
     MixResult,
+    align_banks,
     mixdown,
     strips_from_song,
+    stem_loudness,
 )
 
 if TYPE_CHECKING:  # pragma: no cover - 仅类型检查
@@ -52,6 +54,8 @@ class RenderOptions:
     target_peak: float = DEFAULT_TARGET_PEAK
     blocksize: int | None = None
     dry_run: bool = False
+    align_loudness: bool = True
+    max_align_db: float = 12.0
 
 
 @dataclass
@@ -64,6 +68,9 @@ class RenderResult:
     midi: dict[str, Path] = field(default_factory=dict)
     mix_info: MixResult | None = None
     dry_run: bool = False
+    loudness: dict[str, float] = field(default_factory=dict)
+    align_db: dict[str, float] = field(default_factory=dict)
+    banks: dict[str, str] = field(default_factory=dict)
 
     @property
     def stem_count(self) -> int:
@@ -99,6 +106,7 @@ def render_song(
     backend: RenderBackend,
     soundfont: str,
     options: RenderOptions | None = None,
+    bank_paths: dict[str, str] | None = None,
 ) -> RenderResult:
     """把一首 ``Song`` 渲染成分轨 + 混音。
 
@@ -147,10 +155,12 @@ def render_song(
         write_smf(slice_document(document, index), midi_path)
         if not options.stems:
             continue
+        track_bank = (bank_paths or {}).get(track.id, soundfont)
+        result.banks[track.id] = str(track_bank)
         rendered = backend.render(RenderRequest(
             midi_path=midi_path,
             out_path=stem_path,
-            soundfont=soundfont,
+            soundfont=track_bank,
             sample_rate=options.sample_rate,
             meta={"track": track.id, "role": track.role},
         ))
@@ -165,6 +175,19 @@ def render_song(
         return result
 
     strips = strips_from_song(song, result.stems)
+    if options.align_loudness and len(set(result.banks.values())) > 1:
+        for name, path in result.stems.items():
+            lufs = stem_loudness(Path(path), sample_rate=options.sample_rate)
+            if lufs is not None:
+                result.loudness[name] = lufs
+        result.align_db = align_banks(
+            result.loudness,
+            result.banks,
+            reference_bank=str(soundfont),
+            max_db=options.max_align_db,
+        )
+        for strip in strips:
+            strip.gain_db += result.align_db.get(strip.name, 0.0)
     mix_path = out / f"{base}{FORMATS[options.fmt]}"
     result.mix_info = mixdown(
         strips,
@@ -187,6 +210,61 @@ def _safe_name(text: str) -> str:
     return "".join(keep).strip("._") or "track"
 
 
+#: 清单里表示"用配置默认音源"的 bank 取值
+DEFAULT_BANK_IDS = ("", "gm", "default", "auto")
+
+def resolve_banks(
+    spec,
+    registry=None,
+    *,
+    default_soundfont: str,
+    override: str | None = None,
+) -> dict[str, str]:
+    """按 ``[[track]] bank`` 解析每轨音色库路径（2.1 每轨独立选库）。
+
+    - ``bank`` 为 ``""`` / ``"gm"`` / ``"default"`` / ``"auto"``（或不写）→ 用配置的默认音源；
+    - 其他值按音源库 id 到注册表里查（未注册/校验失败 → 错误码 41）；
+    - ``override`` 非空时全曲统一用它（CLI 的 ``--bank``）。
+
+    Args:
+        spec: ``compose.SongSpec``。
+        registry: ``soundbank.SoundBankRegistry``；None 时现场扫描。
+        default_soundfont: 默认音色库路径。
+        override: 全局覆盖（音源库 id、路径均可，路径直接透传）。
+
+    Returns:
+        ``{轨道 id: 音色库路径}``。
+    """
+    if override:
+        return {track.id: str(override) for track in spec.tracks}
+
+    needed = {
+        (track.bank or "").strip() for track in spec.tracks
+    } - set(DEFAULT_BANK_IDS)
+    resolved: dict[str, str] = {}
+    if needed:
+        if registry is None:
+            from sunoauxtool.soundbank import build_registry
+
+            registry = build_registry()
+        for bank_id in sorted(needed):
+            bank = registry.get(bank_id)          # 未注册 → SoundBankError(41)
+            check = bank.verify()
+            if not check.ok:
+                from sunoauxtool.soundbank import SoundBankError
+
+                raise SoundBankError(
+                    f"音源 {bank_id!r} 校验失败: {check.message}", code=41
+                )
+            resolved[bank_id] = str(bank.path)
+
+    result: dict[str, str] = {}
+    for track in spec.tracks:
+        bank_id = (track.bank or "").strip()
+        result[track.id] = resolved.get(bank_id, str(default_soundfont))
+    return result
+
+
 def describe_result(result: RenderResult) -> list[str]:
     """人类可读摘要（CLI 输出）。"""
     lines = []
@@ -201,6 +279,16 @@ def describe_result(result: RenderResult) -> list[str]:
     if result.stems:
         names = "、".join(sorted(result.stems))
         lines.append(f"分轨 {len(result.stems)} 条：{names}")
+    if result.align_db and any(value for value in result.align_db.values()):
+        worst = max(result.align_db.items(), key=lambda item: abs(item[1]))
+        lines.append(
+            f"跨库响度对齐（{len(result.align_db)} 轨）：实测 "
+            f"{min(result.loudness.values()):.1f}..{max(result.loudness.values()):.1f} LUFS，"
+            f"最大修正 {worst[1]:+.1f} dB（{worst[0]}）"
+        )
+    if result.banks:
+        distinct = sorted(set(result.banks.values()))
+        lines.append(f"音源库 {len(distinct)} 套：{'、'.join(Path(p).name for p in distinct)}")
     lines.append(f"输出目录 {result.out_dir}")
     return lines
 

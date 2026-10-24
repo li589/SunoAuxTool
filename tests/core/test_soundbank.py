@@ -190,12 +190,10 @@ class TestRegistry:
 
 class TestCli:
     def _project(self, tmp_path: Path, monkeypatch) -> Path:
-        """把项目根指向临时目录（module/ 下放两套假音源）。"""
+        """用 SUNOAUX_MODULE_DIR 把扫描根锁到临时目录（放两套假音源）。"""
         _fake_sf2(tmp_path / "module" / "Bank-A" / "Bank-A.sf2")
         _fake_sf2(tmp_path / "module" / "Bank-B" / "Bank-B.sf2")
-        monkeypatch.setattr(
-            "sunoauxtool.env.ProjectRootResolver.resolve", lambda self=None: tmp_path
-        )
+        monkeypatch.setenv("SUNOAUX_MODULE_DIR", str(tmp_path / "module"))
         return tmp_path
 
     def test_list(self, tmp_path: Path, monkeypatch) -> None:
@@ -213,17 +211,17 @@ class TestCli:
         assert all(item["verify"] is True for item in payload)
 
     def test_list_empty(self, tmp_path: Path, monkeypatch) -> None:
-        monkeypatch.setattr(
-            "sunoauxtool.env.ProjectRootResolver.resolve", lambda self=None: tmp_path
-        )
+        empty = tmp_path / "module"
+        empty.mkdir()
+        monkeypatch.setenv("SUNOAUX_MODULE_DIR", str(empty))
         result = runner.invoke(app, ["list"])
         assert result.exit_code == 0
         assert "未发现任何音源" in result.output
 
     def test_list_explicit_bank(self, tmp_path: Path, monkeypatch) -> None:
-        monkeypatch.setattr(
-            "sunoauxtool.env.ProjectRootResolver.resolve", lambda self=None: tmp_path
-        )
+        empty = tmp_path / "module"
+        empty.mkdir()
+        monkeypatch.setenv("SUNOAUX_MODULE_DIR", str(empty))
         path = _fake_sf2(tmp_path / "custom.sf2")
         result = runner.invoke(app, ["list", "--bank", str(path)])
         assert result.exit_code == 0

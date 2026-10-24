@@ -241,14 +241,42 @@ def _bank_from_path(path: Path, fmt: str) -> SoundBank:
     )
 
 
+def module_roots() -> list[Path]:
+    """候选的 ``module/`` 目录（去重、只保留存在的）。
+
+    优先级：``SUNOAUX_MODULE_DIR`` 环境变量 > 当前目录向上的项目根 > 安装包所在仓库根。
+    只认 cwd 是不够的——在任意目录下跑 `sunoaux compose render` 时，cwd 里没有
+    ``module/``，音源库会"凭空消失"（实测踩过）。
+    """
+    import os
+
+    from sunoauxtool.env import ProjectRootResolver
+
+    env = os.environ.get("SUNOAUX_MODULE_DIR")
+    if env:
+        # 显式指定时**只**认它（可预测：CI/测试/多音源库切换都不受其它目录干扰）
+        override = Path(env).expanduser().resolve()
+        return [override] if override.is_dir() else []
+
+    candidates: list[Path] = [
+        ProjectRootResolver().resolve() / "module",
+        Path(__file__).resolve().parents[3] / "module",
+    ]
+
+    seen: list[Path] = []
+    for candidate in candidates:
+        resolved = candidate.resolve()
+        if resolved.is_dir() and resolved not in seen:
+            seen.append(resolved)
+    return seen
+
+
 def build_registry(
     roots: Iterable[Path] | None = None, *, extra: Iterable[SoundBank] = ()
 ) -> SoundBankRegistry:
-    """便捷构造：给定扫描根（默认项目 ``module/``）并登记额外音源。"""
+    """便捷构造：给定扫描根（默认见 :func:`module_roots`）并登记额外音源。"""
     if roots is None:
-        from sunoauxtool.env import ProjectRootResolver
-
-        roots = [ProjectRootResolver().resolve() / "module"]
+        roots = module_roots()
     registry = SoundBankRegistry(roots=tuple(Path(root) for root in roots))
     for bank in extra:
         registry.add(bank)
