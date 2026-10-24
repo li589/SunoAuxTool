@@ -2,6 +2,92 @@
 
 本项目遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.0.0/) 风格。
 
+## [2.0.0] - 2026-10-24（多轨内核：代码驱动编曲 → MIDI/音频/总谱）
+
+**主题**：在 1.9.1 的"单曲生成"之上补一条**数字轴**——一份 `song.toml`（或 Python DSL）
+描述整首曲子，由 Arranger 按段落能量生成 8–16 轨，再渲成分轨 + 混音 + 多声部总谱，
+同一份清单 + 同一种子在字节级可复现。1.x 的全部命令与行为保持不变（绞杀者模式）。
+
+### 新增（按 PR）
+
+- **PR-A `sunoauxtool.midi`：全保真 SMF 交换层**（新增显式依赖 `mido==1.3.3`）
+  - `midi/document.py`：`MidiDocumentV2` / `MidiTrackV2` / `NoteEvent` / `CC` / 三张
+    时间表（速度/拍号/调性）+ `MidiDocumentV2.end_beat`（编排层声明的全曲长度）；
+    `beat_to_seconds()` 按速度表积分（step 与 linear 曲线）。
+  - `midi/io.py`：SMF **format 1、PPQ 960** 读写；写侧每事件独立 `round(beat*ppq)`
+    （无累积漂移）、同 tick 事件按 meta→note_off→bank→program→CC→note_on→raw 排序；
+    读侧支持 format 0 多通道拆分、未闭合 note_on 收尾、二次 program_change / 迟到 CC
+    降级为 raw/CC，中文 meta 用 `charset="utf-8"` + latin1→UTF-8 还原。
+  - `midi/channel.py`：通道分配（鼓固定 9，最多 15 条旋律轨，超限 → 错误码 **45**）。
+- **PR-B `sunoauxtool.compose`：编曲领域模型**
+  - `Song`（唯一真源）/`Section`/`Track`/`Clip`/`MixStrip`/`InstrumentRef`；
+    段落首尾相接、起点落小节线、变拍只在段落边界、鼓固定通道 9；
+    `Song.to_midi()` 复用通道分配 + 混音映射为 CC7/CC10（0 dB = 100，pan 0 = 64）。
+  - `compose/adapters.py`：`from_sequence` / `from_legacy_midi`（旧模型降级为输入源，
+    通道一律重分配）。
+- **PR-C `song.toml` 清单 + Python DSL + `compose` CLI**
+  - `compose/spec.py`：结构校验（**错误码 44**）/ 语义校验（**错误码 40**）/ 编译为 `Song`；
+    所有错误带 **JSON Pointer**（`/track/1/program`），`--json` 输出
+    `{"ok":false,"path","code","message"}`；未知字段直接报错（拼写错误即刻暴露）。
+  - `compose/api.py`：`SongBuilder` 链式 DSL，与 TOML **同构**（同一校验/编译管线）。
+  - `compose/cli.py`：`compose init / validate / build`（`--dry-run` 不落盘），
+    注册到 `sunoaux` 与 `sunoauxtool` 双入口；顺带修正弱起曲的**小节网格锚点**
+    （`_is_bar_boundary` 以 `pickup_beats` 为锚）。
+- **PR-D Arranger v1：能量驱动编曲 + 确定性种子**
+  - `compose/rng.py`：`blake2b(f"{seed}:{section}:{track}:{role}")` 派生独立 RNG
+    （禁止全局 random）→ 同清单字节级复现、改单轨 density 不影响他轨、增删轨不改变他轨。
+  - `compose/harmony.py`：自足解析调式与和弦（`Dm`/`Bb`/`F/A`/`Cmaj7`/`sus4`/`dim7`…），
+    `voice_chord()` 枚举音域内排列，按"缺音 + 跨度 + 向心 + 声部移动"打分（平滑且不挤下缘）。
+  - `compose/melody.py`：动机 + 五算子（移调/倒影/逆行/扩缩/折返）→ 乐句（末句终止式）；
+    `counter_line()` 对旋律倒影移位并避同度。
+  - `compose/rhythm.py`：7 套 groove（pop/rock/electronic/half_time/funk/waltz/ballad），
+    按小节内偏移描述可缩放套 3/4；首拍 crash + 末小节 fill。
+  - `compose/orchestration.py`：角色 → GM 音色/音域/力度 + 能量配器矩阵
+    （<0.3 铺底；0.3–0.6 和弦+贝斯+鼓；0.6–0.85 加旋律；≥0.85 加对位与琶音）。
+  - `compose/humanize.py`：力度 ±6%、微时序 ±1.5% 拍（写 `offset_ticks`，不破坏网格）。
+  - `compose/arranger.py`：**显式音符优先**（手写 `[[track.note]]` 的轨道整轨跳过生成）。
+- **PR-E 渲染 v2：后端协议 + 分轨 + 流式混音**
+  - `render/backend.py`：`RenderBackend` 协议 + `RenderCapabilities` + `FluidSynthBackend`
+    （组合旧 `FluidSynthRenderer`，旧类零改动）。
+  - `render/mixer.py`：`mix = Σ(gain_db · balance(pan) · stem)`，分块流式两遍扫描；
+    mute/solo 语义、尾块补零、归一上限 64×；空测 `mix − Σstems` 实测 **−155 dBFS**
+    （M1 要求 ≤ −60 dBFS）。声像用立体声 balance（中置 1.0/1.0）而非等功率。
+  - `compose/render.py` + `compose render`：每轨切片 MIDI → stems → 混音；
+    错误码 **42**（后端不可用）/**43**（分轨或混音失败）。`--format` 只作用于混音
+    （fluidsynth 只写 wav），分轨恒为 WAV。
+- **PR-F 总谱 v2：移调 / 分谱组 / 分谱**
+  - `ScoreTrack.transpose`（正值 = 记谱比实音高）+ `part_group` + `written_pitch()`；
+    `Score.from_song()`（首行 `song.validate()`）与 `Score.parts()`（逐声部拆谱）。
+  - MusicXML：`<transpose><diatonic|chromatic>` + `<pitch>` 按记谱音高写出 +
+    `<part-group type="start|stop">` 括号（与 score-part 交替插入），按角色自动分组。
+  - `compose score`：`--format svg,png,musicxml`、`--parts`、`--composer`、
+    `--no-part-groups`、`--scale`。
+- **PR-G 音源库注册表**
+  - `soundbank/registry.py`：`SoundBank` + `SoundBankRegistry`（扫描 `module/` 的 `.sf2`、
+    按 id 查询、批量结构校验）；只登记不下载（计划书 N4），对常见免费库给出许可提示。
+  - `soundbank list / info / verify`（`--json` / `--bank` / `--all`，失败退出码 **41**）；
+    `doctor` 新增"音源库 N/M 套可用"。
+- **错误码 40–45 全集登记**：40 清单语义 / 41 音源 / 42 渲染后端 / 43 分轨或混音 /
+  44 清单结构 / 45 MIDI 通道。
+
+### 变更
+- `pyproject.toml` 显式声明 `mido==1.3.3`（此前只是 pretty_midi 的传递依赖）。
+- `compose init` 生成的模板为 **8 轨 6 段 / 36 小节**，`init` 会立刻编排一遍自检
+  （当前模板 → 885 音符 / 90 秒）。
+- 文档：新增 [docs/compose.md](docs/compose.md)（清单契约/DSL/Arranger/渲染/总谱/音源库），
+  `docs/structure.md`、`docs/refactor-2.0-multitrack.md` 同步进度。
+
+### 兼容
+- 1.x 全部 CLI 与公开 Python API 保持可用；`generate midi`/`pipeline`/`render` 行为不变
+  （根套件全绿，覆盖率 91.5%）。
+- 新增能力只在新入口（`compose` / `soundbank`）暴露，可整体回滚（删除新模块即回到 1.9.1）。
+
+### 已知范围
+- 图形谱面（SVG/PNG）按**实音**绘制，移调只体现在 MusicXML；大谱表（钢琴两行谱）
+  与分页留待 2.0.x。
+- 符干偏长的视觉问题属 1.7.0 起的既有渲染行为（旧管线同样存在），本轮未改动。
+- 每轨独立选音源库需 2.1（当前全曲共用一套音源）。
+
 ## [1.9.1] - 2026-10-21（修复：doctor diffrhythm 口径 + CLI help ANSI 断言）
 
 ### 修复

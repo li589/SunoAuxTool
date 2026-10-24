@@ -3,14 +3,17 @@
 **Suno / 海绵音乐 / 网易天音等 AI 音乐工具的前期 + 后期处理工具箱**（原 SmartNoteGen，
 v1.0.0 起统一为单一发行版 `sunoauxtool`）。
 
+- **数字轴（2.0 新增）**：代码/AI 驱动的多轨编曲 —— `song.toml` 清单或 Python DSL →
+  Arranger 生成 8–16 轨 → 成品 MIDI + 分轨 + 混音 + 多声部总谱，**同种子字节级可复现**
 - **前期**：旋律制作、程序化多轨 MIDI 生成、谱面产出（五线谱/简谱/MusicXML）、MIDI↔WAV 互转
-- **后期**：音频下载/转码（猫抓取证 + API adapter 留位，DownloadHelper）、DSP（规划中）、
+- **后期**：音频下载/转码（猫抓取证 + API adapter 留位，DownloadHelper）、DSP、
   音乐视频产出（多轨混音 + 7 种视觉含滚动谱面）、音质提升/分离修复（AudioSR 接入，R5）
 
 > 技术栈：Python 3.12+ · Typer · music21 · pretty_midi · FluidSynth · numpy/soundfile · Pillow · PyTorch（AI 可选）
 > P1 可选：MusicGen / DiffRhythm（AI 扩编曲与歌曲草稿，默认不安装）
 
 > 模块布局（单包多子模块）：`sunoauxtool`（核心：生成/谱面/分析/导出）·
+> `sunoauxtool.compose`（2.0 编曲域：清单/DSL/Arranger）· `sunoauxtool.midi`（全保真 SMF）·
 > `sunoauxtool.video`（原 videomaker）· `sunoauxtool.download`（DownloadHelper，
 > 原 Suno-Cat-Catch-Resolve）。旧包名 `smartnotegen` / `videomaker` 兼容 shim
 > 已于 **1.4.5 移除**，请使用新包名。
