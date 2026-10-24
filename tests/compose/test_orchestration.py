@@ -110,27 +110,30 @@ class TestHumanize:
             assert 1 <= jitter_velocity(100, rng) <= 127
 
     def test_accent_raises_velocity(self) -> None:
+        # 2.2 起重音由演奏法（expression.accent）负责，抖动只做偏移，故 0 抖动即原值
         rng = rng_for(2, "a", "b", "h")
-        assert jitter_velocity(80, rng, spread=0.0, accent=0.1) == 88
-        assert jitter_velocity(80, rng, spread=0.0, accent=0.0) == 80
+        assert jitter_velocity(80, rng, jitter=0) == 80
 
     def test_zero_spread_is_exact(self) -> None:
         rng = rng_for(3, "a", "b", "h")
-        assert jitter_velocity(64, rng, spread=0.0) == 64
+        assert jitter_velocity(64, rng, jitter=0) == 64
 
     def test_clamped_low(self) -> None:
         rng = rng_for(4, "a", "b", "h")
         assert jitter_velocity(2, rng, spread=1.0) >= 1
 
     def test_ticks_within_bounds(self) -> None:
+        # ±10ms @ 120BPM / PPQ960 = 1920 tick/s × 0.01s ≈ ±19 tick
         rng = rng_for(5, "a", "b", "h")
         for _ in range(50):
-            value = jitter_ticks(rng, ppq=960, amount=0.015)
-            assert -15 <= value <= 15
+            value = jitter_ticks(rng, ppq=960, ms=10.0, bpm=120.0)
+            assert -19 <= value <= 19
 
     def test_humanize_returns_new_list(self) -> None:
         notes = [NoteEvent(60, 0.0, 1.0, 90), NoteEvent(62, 1.0, 1.0, 90)]
-        result = humanize(notes, rng_for(6, "a", "b", "h"), velocity_spread=0.1, timing=0.02)
+        result = humanize(
+            notes, rng_for(6, "a", "b", "h"), velocity_jitter=8, timing_ms=10.0
+        )
         assert len(result) == 2
         assert result is not notes
         assert all(note.start == source.start for note, source in zip(result, notes))
@@ -138,7 +141,9 @@ class TestHumanize:
 
     def test_humanize_can_disable_timing(self) -> None:
         notes = [NoteEvent(60, 0.0, 1.0, 90)]
-        result = humanize(notes, rng_for(7, "a", "b", "h"), timing=0.0, velocity_spread=0.0)
+        result = humanize(
+            notes, rng_for(7, "a", "b", "h"), timing_ms=0.0, velocity_jitter=0
+        )
         assert result[0].offset_ticks == 0
         assert result[0].velocity == 90
 

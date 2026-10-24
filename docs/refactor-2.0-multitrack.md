@@ -667,6 +667,14 @@ CI 注意：音频渲染用 2 小节短 fixture；SF2 走 LFS，checkout 后 `gi
 >   移调全链透传、分谱组括号、逐声部分谱；25 + 21 例。
 > - PR-G `soundbank/{registry,cli,exceptions}.py` + `doctor` 音源库行（本阶段）：
 >   扫描登记、结构校验、`soundbank list/info/verify`、错误码 41；43 例。
+>
+> **2.1（M2）**（a39a155）：每轨独立音源库 `[[track]] bank` + 按库响度对齐
+> （分组中位数，非"每轨拉平"）+ `soundbank.module_roots()` 多根扫描；`--bank`/`--no-align-loudness`。
+>
+> **2.2（M3）**：`compose/expression.py`（演奏法/力度/摇摆）+ `Section.dynamic|ramp`、
+> `Track.articulation|swing`、`Song.swing`、段落 `tempo|tempo_curve`；
+> `humanize` 改毫秒口径（±10ms / ±8）；总谱落 `<articulations>` / `<dynamics>` / `<wedge>`
+> 与 SVG 文字/楔形/记号；`--swing|--timing-ms|--velocity-jitter`。显式音符轨也走表现力链。
 
 - [x] `midi/` 包：SMF type 1 往返测试全绿（含 3 点速度表、拍号变化、CC、鼓轨）。
 - [x] `Song.validate()` 覆盖 6 类不变量，错误码 40 可读。

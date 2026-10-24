@@ -183,6 +183,25 @@ def _describe(spec: SongSpec, song: Song | None = None) -> list[str]:
     return result
 
 
+def _arrange_options(
+    *,
+    no_arrange: bool,
+    no_humanize: bool = False,
+    swing: Optional[float] = None,
+    timing_ms: float = 10.0,
+    velocity_jitter: int = 8,
+) -> Optional[ArrangeOptions]:
+    """CLI 开关 → ``ArrangeOptions``；``--no-arrange`` 返回 None（用清单里写好的音符）。"""
+    if no_arrange:
+        return None
+    return ArrangeOptions(
+        humanize=not no_humanize,
+        timing_ms=timing_ms,
+        velocity_jitter=velocity_jitter,
+        swing=swing,
+    )
+
+
 # ---------------------------------------------------------------------------
 # 命令
 # ---------------------------------------------------------------------------
@@ -255,6 +274,11 @@ def build(
     no_humanize: bool = typer.Option(
         False, "--no-humanize", help="关闭力度/时序抖动（严格对齐网格）"
     ),
+    swing: Optional[float] = typer.Option(
+        None, "--swing", help="摇摆比例（0.5 平直，0.66 三连音；覆盖清单设置）"
+    ),
+    timing_ms: float = typer.Option(10.0, "--timing-ms", help="每轨时序抖动上限（毫秒）"),
+    velocity_jitter: int = typer.Option(8, "--velocity-jitter", help="力度抖动幅度（±）"),
 ) -> None:
     """构建成品 MIDI（format 1）+ 编排快照（arrangement.json）。"""
     if not path.exists():
@@ -262,8 +286,11 @@ def build(
         raise typer.Exit(1)
 
     spec = SongSpec.from_toml(path)
-    options = ArrangeOptions(humanize=not no_humanize)
-    song = spec.to_song() if no_arrange else arrange(spec, options)
+    options = _arrange_options(
+        no_arrange=no_arrange, no_humanize=no_humanize, swing=swing,
+        timing_ms=timing_ms, velocity_jitter=velocity_jitter,
+    )
+    song = spec.to_song() if options is None else arrange(spec, options)
     document = song.to_midi()
 
     base = _slug(song.title or path.parent.name)
@@ -325,6 +352,12 @@ def render(
         False, "--no-align-loudness",
         help="不做跨音源库响度对齐（换库后音量会不一致）",
     ),
+    no_humanize: bool = typer.Option(
+        False, "--no-humanize", help="关闭力度/时序抖动（严格对齐网格）"
+    ),
+    swing: Optional[float] = typer.Option(
+        None, "--swing", help="摇摆比例（0.5 平直，0.66 三连音；覆盖清单设置）"
+    ),
     dry_run: bool = typer.Option(False, "--dry-run", help="只打印计划，不写文件"),
 ) -> None:
     """渲染成品音频：每轨独立渲染成分轨（可选独立音源库），再按混音通道条叠加。"""
@@ -336,7 +369,10 @@ def render(
         raise typer.Exit(1)
 
     spec = SongSpec.from_toml(path)
-    song = spec.to_song() if no_arrange else arrange(spec)
+    options = _arrange_options(
+        no_arrange=no_arrange, no_humanize=no_humanize, swing=swing
+    )
+    song = spec.to_song() if options is None else arrange(spec, options)
     base = _slug(song.title or path.parent.name)
     out_dir = Path(out) if out is not None else Path("out") / base
 
@@ -387,6 +423,12 @@ def score(
     no_arrange: bool = typer.Option(
         False, "--no-arrange", help="不做自动编排（只用清单里的 [[track.note]]）"
     ),
+    no_humanize: bool = typer.Option(
+        False, "--no-humanize", help="关闭力度/时序抖动（严格对齐网格）"
+    ),
+    swing: Optional[float] = typer.Option(
+        None, "--swing", help="摇摆比例（0.5 平直，0.66 三连音；覆盖清单设置）"
+    ),
 ) -> None:
     """导出多声部总谱（SVG/PNG/MusicXML，可选分谱）。"""
     if not path.exists():
@@ -402,7 +444,10 @@ def score(
         raise typer.Exit(1)
 
     spec = SongSpec.from_toml(path)
-    song = spec.to_song() if no_arrange else arrange(spec)
+    options = _arrange_options(
+        no_arrange=no_arrange, no_humanize=no_humanize, swing=swing
+    )
+    song = spec.to_song() if options is None else arrange(spec, options)
     base = _slug(song.title or path.parent.name)
     out_dir = Path(out) if out is not None else Path("out") / base / "score"
 

@@ -17,6 +17,7 @@ import math
 from dataclasses import dataclass, field
 from typing import Iterable, Sequence
 
+from sunoauxtool.compose.expression import ARTICULATION_NAMES, DYNAMICS, RAMPS
 from sunoauxtool.exceptions import ParameterError
 from sunoauxtool.midi.channel import ChannelRequest, allocate_channels
 from sunoauxtool.midi.document import (
@@ -252,6 +253,10 @@ class Track:
     muted: bool = False
     transpose: int = 0
     """移调（半音，仅影响总谱记谱：正值=记谱比实音高，如 Bb 单簧管 +2）。"""
+    articulation: str = ""
+    """默认演奏法（staccato/accent/…）；空表示不额外处理。"""
+    swing: float = 0.0
+    """本轨摇摆比例（0.5=平直，0.66≈三连音）；0 表示跟随全曲设置。"""
 
     def __post_init__(self) -> None:
         if not str(self.id).strip():
@@ -274,6 +279,12 @@ class Track:
             raise ParameterError(
                 f"通道 {DRUM_CHANNEL} 保留给鼓轨，track={self.id!r} role={self.role!r}"
             )
+        if self.articulation and self.articulation not in ARTICULATION_NAMES:
+            raise ParameterError(
+                f"未知演奏法 {self.articulation!r}；可用: {', '.join(sorted(ARTICULATION_NAMES))}"
+            )
+        if not 0.0 <= float(self.swing) <= 0.75:
+            raise ParameterError(f"swing 必须在 0..0.75，实际为 {self.swing}")
         if not -24 <= int(self.transpose) <= 24:
             raise ParameterError(f"transpose 超出范围 (-24..24): {self.transpose}")
         if not 0 <= int(self.octave) <= 9:
@@ -300,6 +311,8 @@ class Track:
             "channel": self.channel,
             "octave": self.octave,
             "transpose": self.transpose,
+            "articulation": self.articulation,
+            "swing": self.swing,
             "range": list(self.range) if self.range else None,
             "muted": self.muted,
             "mix": self.mix.to_dict(),
@@ -336,6 +349,8 @@ class Track:
             channel=data.get("channel"),
             octave=data.get("octave", 4),
             transpose=int(data.get("transpose", 0)),
+            articulation=data.get("articulation", ""),
+            swing=float(data.get("swing", 0.0)),
             range=tuple(data["range"]) if data.get("range") else None,
             muted=bool(data.get("muted", False)),
             mix=MixStrip.from_dict(data.get("mix", {})),
@@ -372,6 +387,10 @@ class Section:
     energy: float = 0.5
     progression: list[str] = field(default_factory=list)
     label: str = ""
+    dynamic: str = ""
+    """力度记号（pp..fff）；空表示按 energy 推。"""
+    ramp: str = ""
+    """段内渐变：``""`` / ``cresc`` / ``dim``。"""
 
     def __post_init__(self) -> None:
         if not str(self.id).strip():
@@ -387,6 +406,12 @@ class Section:
         for chord in self.progression:
             if not str(chord).strip():
                 raise ParameterError(f"段落 {self.id!r} 的和弦不能为空")
+        if self.dynamic and self.dynamic not in DYNAMICS:
+            raise ParameterError(
+                f"未知力度记号 {self.dynamic!r}；可用: {', '.join(DYNAMICS)}"
+            )
+        if self.ramp and self.ramp not in RAMPS:
+            raise ParameterError(f"未知渐变 {self.ramp!r}；可用: {', '.join(RAMPS)}")
 
     def to_dict(self) -> dict:
         return {
@@ -397,6 +422,8 @@ class Section:
             "energy": self.energy,
             "progression": list(self.progression),
             "label": self.label,
+            "dynamic": self.dynamic,
+            "ramp": self.ramp,
         }
 
     @classmethod
@@ -409,6 +436,8 @@ class Section:
             energy=data.get("energy", 0.5),
             progression=list(data.get("progression", [])),
             label=data.get("label", ""),
+            dynamic=data.get("dynamic", ""),
+            ramp=data.get("ramp", ""),
         )
 
 
@@ -442,6 +471,8 @@ class Song:
     master: MixStrip = field(default_factory=MixStrip)
     seed: int = 0
     pickup_beats: float = 0.0
+    swing: float = 0.0
+    """全曲摇摆比例（0.5=平直，0.66≈三连音）；轨道可用自己的 swing 覆盖。"""
     schema_version: int = 1
 
     # -- 时间与段落 -------------------------------------------------------
@@ -492,6 +523,8 @@ class Song:
         energy: float = 0.5,
         progression: Sequence[str] | None = None,
         label: str = "",
+        dynamic: str = "",
+        ramp: str = "",
     ) -> Section:
         """追加段落（起始拍自动接在上一段之后）。"""
         if self.section_by_id(section_id) is not None:
@@ -500,6 +533,7 @@ class Song:
         section = Section(
             id=section_id, name=name or section_id, start=start, bars=bars,
             energy=energy, progression=list(progression or []), label=label,
+            dynamic=dynamic, ramp=ramp,
         )
         self.sections.append(section)
         return section
@@ -526,6 +560,8 @@ class Song:
         4. 片段归属与边界、音符落在片段内、音符在轨道音域内；
         5. 弱起拍非负且不超过一个小节。
         """
+        if not 0.0 <= float(self.swing) <= 0.75:
+            raise ParameterError(f"swing 必须在 0..0.75，实际为 {self.swing}")
         _finite(self.pickup_beats, "pickup_beats")
         if self.pickup_beats < 0:
             raise ParameterError(f"弱起拍不能为负: {self.pickup_beats}")
@@ -686,6 +722,7 @@ class Song:
             "title": self.title,
             "seed": self.seed,
             "pickup_beats": self.pickup_beats,
+            "swing": self.swing,
             "tempo_map": [
                 {"beat": point.beat, "bpm": point.bpm, "curve": point.curve}
                 for point in self.tempo_map
@@ -717,6 +754,7 @@ class Song:
             master=MixStrip.from_dict(data.get("master", {})),
             seed=int(data.get("seed", 0)),
             pickup_beats=float(data.get("pickup_beats", 0.0)),
+            swing=float(data.get("swing", 0.0)),
             schema_version=int(data.get("schema_version", 1)),
         )
         if validate:

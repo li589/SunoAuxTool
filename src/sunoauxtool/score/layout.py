@@ -922,12 +922,14 @@ def _align_beam_endpoints(clusters: Sequence[LaidCluster]) -> None:
 # ---------------------------------------------------------------------------
 
 def _staff_vertical_extent(
-    staff_measures: Sequence[LaidMeasure], space: float
+    staff_measures: Sequence[LaidMeasure], space: float, *, marks: bool = False
 ) -> Tuple[float, float]:
     """求一条谱表需要向上/向下预留的空间（单位 space）。
 
     取「加线范围」与「符干末端」的并集，并保底留出符干 + 符杠的常规高度，
     避免行距被压扁导致上行符杠与下行加线相撞。
+
+    ``marks=True`` 表示该谱表下方还要画力度记号/楔形（约 3 space），需额外行距。
     """
     above_steps = 0
     below_steps = 0
@@ -944,7 +946,7 @@ def _staff_vertical_extent(
                 else:
                     below_steps = max(below_steps, -(min(c.step_offsets) - 2 * c.stem_len))
     above = max(above_steps / 2.0, 4.2)
-    below = max(below_steps / 2.0, 3.6)
+    below = max(below_steps / 2.0, 3.6) + (3.0 if marks else 0.0)
     return above, below
 
 
@@ -1078,7 +1080,12 @@ def layout_score(score: Score, options: Optional[LayoutOptions] = None) -> Score
         heights: List[float] = []
         tops: List[float] = []
         for t_idx, staff in enumerate(staffs):
-            above, below = _staff_vertical_extent(staff.measures, space)
+            # 谱表下方还要放力度记号与渐变楔形时，多留一点行距（否则与下一行相撞）
+            marks = False
+            if 0 <= staff.track_index < len(score.tracks):
+                track = score.tracks[staff.track_index]
+                marks = bool(track.dynamics or track.wedges)
+            above, below = _staff_vertical_extent(staff.measures, space, marks=marks)
             top = cursor_y + above * space + 6.0
             heights.append(above * space + STAFF_SPACES * space + below * space + 12.0)
             tops.append(top)

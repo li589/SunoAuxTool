@@ -14,17 +14,30 @@ from sunoauxtool.midi.document import NoteEvent
 
 
 def jitter_velocity(
-    base: int, rng, *, spread: float = 0.06, accent: float = 0.0
+    base: int, rng, *, jitter: int = 8, spread: float | None = None
 ) -> int:
-    """力度抖动：``base`` 的 ±spread 倍，另加段落重音 ``accent``。"""
-    delta = base * spread
-    value = base + rng.uniform(-delta, delta) + accent * base
-    return max(1, min(127, int(round(value))))
+    """力度抖动：默认 ±8（绝对 MIDI 力度），也兼容旧的相对比例写法。"""
+    if spread:
+        limit = abs(base * spread)
+    else:
+        limit = abs(int(jitter))
+    if limit <= 0:
+        return max(1, min(127, int(base)))
+    return max(1, min(127, int(round(base + rng.uniform(-limit, limit)))))
 
 
-def jitter_ticks(rng, *, ppq: int = 960, amount: float = 0.015) -> int:
-    """微时序：正负若干个 tick（默认 ±15% 拍以内，实际取 ±1.5% 拍）。"""
-    limit = max(1, int(round(ppq * amount)))
+def jitter_ticks(
+    rng, *, ppq: int = 960, ms: float = 10.0, bpm: float = 120.0
+) -> int:
+    """微时序：以**毫秒**为单位（默认 ±10ms），换算成当前速度下的 tick。
+
+    用毫秒而不是"拍的比例"是因为 M3 的听感指标是时间量：同样 ±10ms，慢歌里
+    占比更大、快歌里更小，正是演奏者手上的感觉。
+    """
+    if ms <= 0:
+        return 0
+    ticks_per_second = ppq * (float(bpm) / 60.0)
+    limit = max(1, int(round(ticks_per_second * (float(ms) / 1000.0))))
     return int(round(rng.uniform(-limit, limit)))
 
 
@@ -33,9 +46,9 @@ def humanize(
     rng,
     *,
     ppq: int = 960,
-    velocity_spread: float = 0.06,
-    timing: float = 0.015,
-    accent: float = 0.0,
+    velocity_jitter: int = 8,
+    timing_ms: float = 10.0,
+    bpm: float = 120.0,
 ) -> list[NoteEvent]:
     """返回人性化后的新音符列表（不修改入参）。
 
@@ -43,9 +56,9 @@ def humanize(
         notes: 待处理音符。
         rng: 随机源（由 :func:`compose.rng.rng_for` 派生）。
         ppq: 每拍 tick 数（微时序的量纲）。
-        velocity_spread: 力度抖动比例（0 = 不抖）。
-        timing: 时序抖动比例（占一拍的比例，0 = 不抖）。
-        accent: 整体重音（0.1 = 全体 +10%）。
+        velocity_jitter: 力度抖动幅度（±MIDI 力度，0 = 不抖）。
+        timing_ms: 时序抖动幅度（±毫秒，0 = 不抖）。
+        bpm: 当前速度（毫秒 → tick 换算）。
     """
     result: list[NoteEvent] = []
     for note in notes:
@@ -53,11 +66,11 @@ def humanize(
             pitch=note.pitch,
             start=note.start,
             duration=note.duration,
-            velocity=jitter_velocity(note.velocity, rng, spread=velocity_spread, accent=accent),
+            velocity=jitter_velocity(note.velocity, rng, jitter=velocity_jitter),
             release_velocity=note.release_velocity,
             articulation=note.articulation,
-            offset_ticks=note.offset_ticks + (
-                jitter_ticks(rng, ppq=ppq, amount=timing) if timing else 0
+            offset_ticks=note.offset_ticks + jitter_ticks(
+                rng, ppq=ppq, ms=timing_ms, bpm=bpm
             ),
         ))
     return result

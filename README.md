@@ -292,10 +292,12 @@ sunoauxtool ai diffrhythm --prompt "slow ballad" --lyrics "第一句词" --durat
 [docs/structure.md](docs/structure.md)；1.7.0 实战验证报告见
 [docs/verification-1.7.0.md](docs/verification-1.7.0.md)。
 
-> **2.0 路线（多轨编曲 / 音源体系）**：产品计划见
+> **2.0 路线（多轨编曲 / 音源体系 / 表现力）**：产品计划见
 > [docs/plan-2.0-multitrack.md](docs/plan-2.0-multitrack.md)，技术重构方案见
 > [docs/refactor-2.0-multitrack.md](docs/refactor-2.0-multitrack.md)，
 > 已交付的 `compose` 清单/DSL/CLI 用法见 [docs/compose.md](docs/compose.md)。
+> 现状：2.0 多轨内核 → 2.1 每轨独立音源库 + 跨库响度对齐 → 2.2 表现力
+> （演奏法/力度记号/渐强渐弱/摇摆/段落弹性速度）；下一步 2.3 为 AI 编曲闭环。
 
 ---
 

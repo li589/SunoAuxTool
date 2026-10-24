@@ -50,6 +50,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Iterable, Sequence
 
+from sunoauxtool.compose.expression import ARTICULATION_NAMES, DYNAMICS, RAMPS
 from sunoauxtool.compose.harmony import parse_chord
 from sunoauxtool.compose.song import (
     KNOWN_ROLES,
@@ -229,16 +230,26 @@ class SectionSpec:
     energy: float = 0.5
     progression: list[str] = field(default_factory=list)
     label: str = ""
+    dynamic: str = ""
+    ramp: str = ""
+    tempo: float | None = None
+    tempo_curve: str = "linear"
 
     def to_dict(self) -> dict:
-        return {
+        payload: dict[str, Any] = {
             "id": self.id,
             "name": self.name,
             "bars": self.bars,
             "energy": self.energy,
             "progression": list(self.progression),
             "label": self.label,
+            "dynamic": self.dynamic,
+            "ramp": self.ramp,
         }
+        if self.tempo is not None:
+            payload["tempo"] = self.tempo
+            payload["tempo_curve"] = self.tempo_curve
+        return payload
 
 
 @dataclass
@@ -254,6 +265,8 @@ class TrackSpec:
     channel: int | None = None
     octave: int = 4
     transpose: int = 0
+    articulation: str = ""
+    swing: float = 0.0
     range: tuple[int, int] | None = None
     sections: list[str] = field(default_factory=list)
     mix: MixStrip = field(default_factory=MixStrip)
@@ -274,6 +287,8 @@ class TrackSpec:
             "channel": self.channel,
             "octave": self.octave,
             "transpose": self.transpose,
+            "articulation": self.articulation,
+            "swing": self.swing,
             "range": list(self.range) if self.range else None,
             "sections": list(self.sections),
             "mix": self.mix.to_dict(),
@@ -302,6 +317,7 @@ class SongSpec:
     meter: str = "4/4"
     seed: int = 0
     pickup_beats: float = 0.0
+    swing: float = 0.0
     bars: int | None = None
     sections: list[SectionSpec] = field(default_factory=list)
     tracks: list[TrackSpec] = field(default_factory=list)
@@ -336,7 +352,8 @@ class SongSpec:
             raise SpecError("/schema", f"不支持的清单版本 {schema}（当前只支持 {SCHEMA_VERSION}）")
 
         song = _cast(data.get("song", {}), "dict", "/song")
-        _only(song, ("title", "key", "tempo", "meter", "seed", "pickup_beats", "bars"), "/song")
+        _only(song, ("title", "key", "tempo", "meter", "seed", "pickup_beats",
+                     "swing", "bars"), "/song")
         spec = cls(
             schema=schema,
             title=_opt(song, "title", "str", "", "/song"),
@@ -345,6 +362,7 @@ class SongSpec:
             meter=_opt(song, "meter", "str", "4/4", "/song"),
             seed=_opt(song, "seed", "int", 0, "/song"),
             pickup_beats=_opt(song, "pickup_beats", "float", 0.0, "/song"),
+            swing=_opt(song, "swing", "float", 0.0, "/song"),
             bars=_opt(song, "bars", "int", None, "/song"),
         )
 
@@ -386,6 +404,9 @@ class SongSpec:
         _parse_meter(self.meter)
         if self.pickup_beats < 0:
             raise SpecError("/song/pickup_beats", "弱起拍不能为负", ARRANGEMENT_ERROR)
+        if not 0.0 <= self.swing <= 0.75:
+            raise SpecError("/song/swing", f"swing 必须在 0..0.75，实际为 {self.swing}",
+                            ARRANGEMENT_ERROR)
         if self.bars is not None and self.bars != sum(section.bars for section in self.sections):
             raise SpecError(
                 "/song/bars",
@@ -430,6 +451,26 @@ class SongSpec:
             if not 0.0 <= section.energy <= 1.0:
                 raise SpecError(f"{path}/energy", f"energy 必须在 0..1，实际为 {section.energy}",
                                 ARRANGEMENT_ERROR)
+            if section.dynamic and section.dynamic not in DYNAMICS:
+                raise SpecError(
+                    f"{path}/dynamic",
+                    f"未知力度记号 {section.dynamic!r}；可用: {', '.join(DYNAMICS)}",
+                    ARRANGEMENT_ERROR,
+                )
+            if section.ramp and section.ramp not in RAMPS:
+                raise SpecError(
+                    f"{path}/ramp",
+                    f"未知渐变 {section.ramp!r}；可用: {', '.join(RAMPS)}",
+                    ARRANGEMENT_ERROR,
+                )
+            if section.tempo is not None and section.tempo <= 0:
+                raise SpecError(f"{path}/tempo", "tempo 必须 > 0", ARRANGEMENT_ERROR)
+            if section.tempo_curve not in CURVES:
+                raise SpecError(
+                    f"{path}/tempo_curve",
+                    f"速度曲线只支持 {'/'.join(CURVES)}，实际为 {section.tempo_curve!r}",
+                    ARRANGEMENT_ERROR,
+                )
             for chord_index, chord in enumerate(section.progression):
                 if not chord.strip():
                     raise SpecError(f"{path}/progression/{chord_index}", "和弦不能为空",
@@ -481,6 +522,17 @@ class SongSpec:
                 channels[track.channel] = track.id
             if track.role == "drums":
                 drums += 1
+            if track.articulation and track.articulation not in ARTICULATION_NAMES:
+                raise SpecError(
+                    f"{path}/articulation",
+                    f"未知演奏法 {track.articulation!r}；"
+                    f"可用: {', '.join(sorted(ARTICULATION_NAMES))}",
+                    ARRANGEMENT_ERROR,
+                )
+            if not 0.0 <= track.swing <= 0.75:
+                raise SpecError(f"{path}/swing",
+                                f"swing 必须在 0..0.75，实际为 {track.swing}",
+                                ARRANGEMENT_ERROR)
             if not -24 <= track.transpose <= 24:
                 raise SpecError(f"{path}/transpose",
                                 f"transpose 必须在 -24..24，实际为 {track.transpose}",
@@ -583,13 +635,13 @@ class SongSpec:
         self.validate()
         song = Song(
             title=self.title,
-            tempo_map=[TempoPoint(beat=beat, bpm=bpm, curve=curve)
-                       for beat, bpm, curve in self.effective_tempo_map()],
+            tempo_map=_tempo_points(self),
             meter_map=[MeterPoint(beat=0.0, numerator=self._meter_pair()[0],
                                   denominator=self._meter_pair()[1])],
             key_map=[KeyPoint(beat=0.0, key=self.key)],
             seed=self.seed,
             pickup_beats=self.pickup_beats,
+            swing=self.swing,
         )
         for section in self.sections:
             song.add_section(
@@ -599,6 +651,8 @@ class SongSpec:
                 energy=section.energy,
                 progression=section.progression,
                 label=section.label,
+                dynamic=section.dynamic,
+                ramp=section.ramp,
             )
         for spec in self.tracks:
             song.add_track(self._build_track(song, spec))
@@ -635,6 +689,8 @@ class SongSpec:
             mix=spec.mix,
             octave=spec.octave,
             transpose=spec.transpose,
+            articulation=spec.articulation,
+            swing=spec.swing,
             range=spec.range,
             muted=spec.muted,
         )
@@ -652,6 +708,8 @@ class SongSpec:
         }
         if self.pickup_beats:
             song["pickup_beats"] = self.pickup_beats
+        if self.swing:
+            song["swing"] = self.swing
         if self.bars is not None:
             song["bars"] = self.bars
         payload: dict[str, Any] = {"schema": self.schema, "song": song}
@@ -686,11 +744,56 @@ class SongSpec:
 
 
 # ---------------------------------------------------------------------------
+# 速度表合成（显式 [[tempo]] + 段落级 rit./accel.）
+# ---------------------------------------------------------------------------
+
+def _tempo_points(spec: SongSpec) -> list[TempoPoint]:
+    """合成速度表：显式速度点优先，段落 ``tempo`` 追加"渐变 + 到站"两点。
+
+    段落 ``tempo = 84`` 的语义是：**该段从当前速度线性渐变到 84**，段末转到 84 继续。
+    实现为 ``(段首, 当前速度, linear)`` + ``(段末, 84, step)``，段与段之间的衔接是"到站即停"。
+    """
+    points: list[tuple[float, float, str]] = list(spec.effective_tempo_map())
+    if not any(section.tempo is not None for section in spec.sections):
+        return [TempoPoint(beat=beat, bpm=bpm, curve=curve) for beat, bpm, curve in points]
+
+    bar_length = spec.bar_length()
+    cursor = spec.pickup_beats
+    current = points[-1][1]
+    merged: list[tuple[float, float, str]] = [(0.0, points[0][1], "step")]
+    for section in spec.sections:
+        start, end = cursor, cursor + section.bars * bar_length
+        cursor = end
+        if section.tempo is None:
+            continue
+        if start > 0:
+            merged.append((start, current, section.tempo_curve))
+        merged.append((end, float(section.tempo), "step"))
+        current = float(section.tempo)
+    # 去重（beat 必须严格递增）
+    cleaned: list[tuple[float, float, str]] = []
+    for beat, bpm, curve in merged:
+        if cleaned and abs(cleaned[-1][0] - beat) < 1e-9:
+            cleaned[-1] = (beat, bpm, curve)
+        else:
+            cleaned.append((beat, bpm, curve))
+    # 显式速度点（beat>0）仍然生效：合并后按 beat 排序，冲突以显式点为准
+    explicit = {round(beat, 6): (bpm, curve) for beat, bpm, curve in points if beat > 0}
+    combined: dict[float, tuple[float, str]] = {beat: (bpm, curve) for beat, bpm, curve in cleaned}
+    combined.update(explicit)
+    ordered = sorted(combined.items())
+    if ordered[0][0] != 0.0:
+        ordered.insert(0, (0.0, (points[0][1], "step")))
+    return [TempoPoint(beat=beat, bpm=bpm, curve=curve) for beat, (bpm, curve) in ordered]
+
+
+# ---------------------------------------------------------------------------
 # 子表构造器
 # ---------------------------------------------------------------------------
 
 def _section_from(item: dict, path: str) -> SectionSpec:
-    _only(item, ("id", "name", "bars", "energy", "progression", "label"), path)
+    _only(item, ("id", "name", "bars", "energy", "progression", "label",
+                 "dynamic", "ramp", "tempo", "tempo_curve"), path)
     progression = item.get("progression", [])
     if isinstance(progression, str):
         chords = split_progression(progression)
@@ -706,13 +809,17 @@ def _section_from(item: dict, path: str) -> SectionSpec:
         energy=_opt(item, "energy", "float", 0.5, path),
         progression=chords,
         label=_opt(item, "label", "str", "", path),
+        dynamic=_opt(item, "dynamic", "str", "", path),
+        ramp=_opt(item, "ramp", "str", "", path),
+        tempo=_opt(item, "tempo", "float", None, path),
+        tempo_curve=_opt(item, "tempo_curve", "str", "linear", path),
     )
 
 
 def _track_from(item: dict, path: str) -> TrackSpec:
     _only(item, ("id", "name", "role", "instrument", "bank", "program", "channel",
-                 "octave", "transpose", "range", "sections", "mix", "muted", "note",
-                 "density", "groove"), path)
+                 "octave", "transpose", "articulation", "swing", "range", "sections",
+                 "mix", "muted", "note", "density", "groove"), path)
     raw_range = item.get("range")
     if raw_range is None:
         narrow: tuple[int, int] | None = None
@@ -748,6 +855,8 @@ def _track_from(item: dict, path: str) -> TrackSpec:
         channel=_opt(item, "channel", "int", None, path),
         octave=_opt(item, "octave", "int", 4, path),
         transpose=_opt(item, "transpose", "int", 0, path),
+        articulation=_opt(item, "articulation", "str", "", path),
+        swing=_opt(item, "swing", "float", 0.0, path),
         range=narrow,
         sections=sections,
         mix=mix,

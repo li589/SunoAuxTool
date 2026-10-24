@@ -19,6 +19,12 @@ from dataclasses import dataclass
 from typing import Sequence
 
 from sunoauxtool.compose.harmony import Chord, Key, parse_chord, parse_key, voice_chord
+from sunoauxtool.compose.expression import (
+    apply_articulations,
+    apply_dynamics,
+    apply_swing,
+    dynamic_for_energy,
+)
 from sunoauxtool.compose.humanize import humanize as humanize_notes
 from sunoauxtool.compose.melody import counter_line, phrase
 from sunoauxtool.compose.orchestration import (
@@ -44,11 +50,14 @@ class ArrangeOptions:
     """编排开关（默认全开；``--no-arrange`` 可整体关闭生成）。"""
 
     humanize: bool = True
-    timing: float = 0.015
-    velocity_spread: float = 0.06
+    timing_ms: float = 10.0
+    velocity_jitter: int = 8
+    ppq: int = 960
     fill: bool = True
     crash: bool = True
     energy_gate: bool = True
+    swing: float | None = None
+    """全曲摇摆覆盖（None = 用 Song/轨道的设置）。"""
 
 
 def _fallback_chord(key: Key) -> Chord:
@@ -275,16 +284,59 @@ def _clips_for(
             song, track, tspec, section, key, options,
             melody_by_section.get(section.id, ()),
         )
-        if notes and options.humanize:
-            notes = humanize_notes(
-                notes,
-                rng_for(song.seed, section.id, track.id, "humanize"),
-                velocity_spread=options.velocity_spread,
-                timing=options.timing,
-            )
+        if notes:
+            notes = _apply_expression(song, track, section, notes, options)
         clips.append(Clip(start=start, length=length, notes=list(notes),
                           section_id=section.id))
     return clips
+
+
+def _tempo_at(song: Song, beat: float) -> float:
+    """取 ``beat`` 处的速度（速度表按 beat 升序）。"""
+    bpm = song.tempo_map[0].bpm
+    for point in song.tempo_map:
+        if point.beat <= beat + 1e-9:
+            bpm = point.bpm
+        else:
+            break
+    return float(bpm)
+
+
+def _apply_expression(
+    song: Song,
+    track: Track,
+    section: Section,
+    notes: list[NoteEvent],
+    options: ArrangeOptions,
+) -> list[NoteEvent]:
+    """表现力处理链：摇摆 → 演奏法 → 力度 → 人性化。
+
+    顺序有讲究：摇摆只动 ``offset_ticks``，演奏法改时值/力度，力度缩放力度，
+    人性化最后抖动（这样"抖"的是最终力度，而不是被后续修正吃掉）。
+    """
+    ratio = (
+        float(options.swing) if options.swing is not None
+        else (track.swing or song.swing or 0.0)
+    )
+    if ratio:
+        # 摇摆永远以八分为单位（3/4 也一样：每对八分的前半/后半）
+        notes = apply_swing(notes, ratio, ppq=options.ppq, grid=0.5)
+    notes = apply_articulations(notes, track.articulation or None)
+    dynamic = section.dynamic or dynamic_for_energy(section.energy)
+    notes = apply_dynamics(
+        notes, dynamic=dynamic, ramp=section.ramp,
+    )
+    if options.humanize:
+        bpm = _tempo_at(song, section.start)
+        notes = humanize_notes(
+            notes,
+            rng_for(song.seed, section.id, track.id, "humanize"),
+            ppq=options.ppq,
+            velocity_jitter=options.velocity_jitter,
+            timing_ms=options.timing_ms,
+            bpm=bpm,
+        )
+    return notes
 
 
 def arrange(spec: SongSpec, options: ArrangeOptions | None = None) -> Song:
@@ -310,10 +362,20 @@ def arrange(spec: SongSpec, options: ArrangeOptions | None = None) -> Song:
         song.tracks,
         key=lambda item: ROLE_ORDER.index(item.role) if item.role in ROLE_ORDER else len(ROLE_ORDER),
     )
+    sections_by_id = {section.id: section for section in song.sections}
     for track in ordered:
         tspec = specs[track.id]
         if any(clip.notes for clip in track.clips):
-            continue  # 显式音符优先：整轨跳过生成
+            # 显式音符优先：整轨跳过**生成**，但表现力照常施加
+            # （摇摆/演奏法/力度/人性化是"怎么演奏"，与音符从哪来无关）
+            for clip in track.clips:
+                section = sections_by_id.get(clip.section_id)
+                if section is None or not clip.notes:
+                    continue
+                clip.notes = _apply_expression(
+                    song, track, section, list(clip.notes), options
+                )
+            continue
         if not track.instrument.has_explicit_program:
             track.instrument = default_instrument(track.role, bank=track.instrument.bank)
         track.clips = _clips_for(song, track, tspec, key, options)

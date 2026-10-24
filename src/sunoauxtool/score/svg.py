@@ -214,6 +214,28 @@ REST_BAR_W = 0.52
 REST_BAR_H = 0.44
 FLAG_STEP = 0.86
 
+#: 力度记号的基线（相对谱表最下线的 space 数）
+DYNAMIC_DY = 2.95
+#: 渐变楔形中线相对力度文字基线的偏移（负值 = 略高于基线，与文字共处一带）
+WEDGE_DY = -0.40
+#: 渐变楔形的最大张口宽度
+WEDGE_GAP = 2.20
+#: 力度文字宽度估算（每字符 space 数，用于让楔形避开同小节的力度记号）
+DYNAMIC_CHAR_W = 0.78
+#: 演奏法记号到符头中心的距离
+ARTIC_DY = 1.12
+
+#: 演奏法名 → 记号形状（未列出的画成符头外侧的点，与 staccato 同形）
+_ARTIC_GLYPHS: Dict[str, str] = {
+    "staccato": "dot",
+    "spiccato": "dot",
+    "pizz": "dot",
+    "staccatissimo": "tick",
+    "tenuto": "line",
+    "accent": "accent",
+    "marcato": "marcato",
+}
+
 #: 调号中各变音记号的音级偏移（**高音谱号**口径；低音谱号整体平移 BASS_KEY_SIG_SHIFT）
 KEY_SIG_STEPS: Dict[int, Dict[int, int]] = {
     1: {3: 8, 0: 5, 4: 9, 1: 6, 5: 3, 2: 7, 6: 4},   # F C G D A E B
@@ -317,6 +339,7 @@ class ScoreSvgRenderer:
                 self._signature(staff, bottom, with_time_signature=is_first)
                 for measure in staff.measures:
                     self._measure_content(measure, bottom, show_number=staff_index == 0)
+                self._draw_expression(staff, bottom)
                 for measure in staff.measures:
                     self._beams(measure, bottom)
             self._barlines(system, final=is_last)
@@ -519,6 +542,8 @@ class ScoreSvgRenderer:
             if cluster.beam_group is None and cluster.beams > 0:
                 self._draw_flags(sx, y2, cluster)
 
+        self._draw_articulations(cluster, bottom)
+
     def _draw_dots(self, cluster: LaidCluster, note, note_y: float, space: float) -> None:
         """附点：位于符头右侧的间上（线音符放到上一间）。"""
         y = note_y - space / 2.0 if note.step_offset % 2 == 0 else note_y
@@ -544,6 +569,167 @@ class ScoreSvgRenderer:
                 f"{bx:.3f},{oy + d * 0.30:.3f} Z"
             )
             self.canvas.path(path, self.theme.ink, transform=f"scale({space:.4f})")
+
+    # -- 演奏法 / 力度 / 渐变 ---------------------------------------------
+
+    def _draw_articulations(self, cluster: LaidCluster, bottom: float) -> None:
+        """在符头外侧画演奏法记号（符干朝上画在上方，朝下画在下方）。
+
+        整个簇只画一次：和弦各音的演奏法在语义上是「同一个音头」的标记，
+        逐符头重复画会叠成一坨。
+        """
+        if cluster.is_rest:
+            return
+        names = {
+            str(n.note.articulation).strip().lower()
+            for n in cluster.notes
+            if n.note.articulation
+        }
+        steps = cluster.step_offsets
+        if not names or not steps:
+            return
+        space = self.space
+        up = cluster.stem_up or cluster.note_type == "whole"
+        anchor = self._y(bottom, max(steps) if up else min(steps))
+        y = anchor - ARTIC_DY * space if up else anchor + ARTIC_DY * space
+        for name in sorted(names):
+            glyph = _ARTIC_GLYPHS.get(name)
+            if glyph:
+                self._draw_artic_glyph(glyph, cluster.x, y, up)
+
+    def _draw_artic_glyph(self, glyph: str, x: float, y: float, up: bool) -> None:
+        """画单个演奏法记号（全部以 space 为单位，避免线宽/尺寸随版面漂移）。"""
+        space = self.space
+        width = self._w(BARLINE_W)
+        if glyph == "dot":
+            self.canvas.circle(x, y, DOT_R * space, self.theme.ink)
+            return
+        if glyph == "line":  # tenuto：短横
+            self.canvas.line(
+                x - 0.55 * space, y, x + 0.55 * space, y, self._w(0.22), self.theme.ink
+            )
+            return
+        if glyph == "tick":  # staccatissimo：短促的三角楔（尖端朝向符头）
+            d = 1.0 if up else -1.0
+            bx, by = x / space, y / space
+            path = (
+                f"M {bx - 0.22:.3f},{by - d * 0.05:.3f} "
+                f"L {bx + 0.22:.3f},{by - d * 0.05:.3f} "
+                f"L {bx:.3f},{by + d * 0.72:.3f} Z"
+            )
+            self.canvas.path(path, self.theme.ink, transform=f"scale({space:.4f})")
+            return
+        # accent ">"：尖端朝右；marcato "^"：尖端朝上（符干朝下时整体镜像）
+        d = 1.0 if up else -1.0
+        if glyph == "marcato":
+            self.canvas.line(
+                x - 0.42 * space, y + d * 0.34 * space, x, y - d * 0.30 * space,
+                width, self.theme.ink,
+            )
+            self.canvas.line(
+                x + 0.42 * space, y + d * 0.34 * space, x, y - d * 0.30 * space,
+                width, self.theme.ink,
+            )
+            return
+        self.canvas.line(
+            x - 0.40 * space, y - 0.34 * space, x + 0.34 * space, y, width, self.theme.ink
+        )
+        self.canvas.line(
+            x - 0.40 * space, y + 0.34 * space, x + 0.34 * space, y, width, self.theme.ink
+        )
+
+    def _track_of(self, staff: LaidStaff):
+        """谱表 → ScoreTrack（轨序号越界时返回 None）。"""
+        tracks = self.layout.score.tracks
+        if 0 <= staff.track_index < len(tracks):
+            return tracks[staff.track_index]
+        return None
+
+    def _expression_base(self, staff: LaidStaff) -> float:
+        """力度文字基线（相对谱表下线的 space 数）。
+
+        默认 ``DYNAMIC_DY``；谱表下方还有东西时整体让开：
+        最低符头（含加线外的低音）让出 1.15 space，演奏法记号（符干朝下的
+        staccato/tenuto 等）让出 1.55 space —— 否则力度文字会与它们叠在一起。
+        """
+        lowest_note = 0.0
+        lowest_mark = 0.0
+        for measure in staff.measures:
+            for cluster in measure.clusters:
+                if cluster.is_rest or not cluster.step_offsets:
+                    continue
+                bottom_step = min(cluster.step_offsets)
+                lowest_note = max(lowest_note, -bottom_step / 2.0 + 0.60)
+                if cluster.stem_up or cluster.note_type == "whole":
+                    continue  # 记号画在上方，不占下方这一带
+                if any(n.note.articulation for n in cluster.notes):
+                    lowest_mark = max(lowest_mark, -bottom_step / 2.0 + ARTIC_DY)
+        return max(DYNAMIC_DY, lowest_note + 1.15, lowest_mark + 1.55)
+
+    def _draw_expression(self, staff: LaidStaff, bottom: float) -> None:
+        """画力度记号（谱表下方文字）与渐变楔形（跨小节连线）。
+
+        楔形按「段内等分」插值：一个 4 小节的 crescendo 每小节张口 1/4，
+        因此跨系统换行时分段绘制也仍然连贯。
+        """
+        track = self._track_of(staff)
+        if track is None:
+            return
+        space = self.space
+        base = self._expression_base(staff)
+        for measure in staff.measures:
+            name = track.dynamics.get(measure.index)
+            if name:
+                self.canvas.text(
+                    measure.x + 0.55 * space, bottom + base * space, str(name),
+                    1.30 * space, self.theme.ink, self.opts.font_family,
+                    weight="bold", style="italic",
+                )
+        for start, end, kind in self._wedge_spans(track):
+            for measure in staff.measures:
+                if start <= measure.index <= end:
+                    indent = 0.0
+                    if measure.index == start:
+                        label = track.dynamics.get(measure.index)
+                        if label:  # 与力度记号同起时，楔形从文字右侧起画（记谱惯例）
+                            indent = 0.30 + DYNAMIC_CHAR_W * len(str(label))
+                    self._draw_hairpin(measure, start, end, kind, bottom, indent, base)
+
+    @staticmethod
+    def _wedge_spans(track) -> List[Tuple[int, int, str]]:
+        """``[(起小节, 收小节, 类型)]``：把 wedges / wedge_ends 配成区间。"""
+        ends = sorted(track.wedge_ends)
+        spans: List[Tuple[int, int, str]] = []
+        for start, kind in sorted(track.wedges.items()):
+            end = next((cand for cand in ends if cand >= start), start)
+            spans.append((start, end, str(kind)))
+        return spans
+
+    def _draw_hairpin(
+        self, measure: LaidMeasure, start: int, end: int, kind: str, bottom: float,
+        indent: float = 0.0, base: float = 0.0,
+    ) -> None:
+        """画一小节内的楔形片段（crescendo 向右张开，diminuendo 向右收拢）。"""
+        space = self.space
+        total = max(1, end - start + 1)
+        offset = measure.index - start
+        gap0 = self._wedge_gap(kind, offset / total) * space
+        gap1 = self._wedge_gap(kind, (offset + 1) / total) * space
+        # 略高于力度文字基线：与文字同起时已用 indent 让开，纵向不必再让
+        lane = (DYNAMIC_DY if base is None else base) + WEDGE_DY
+        y = bottom + lane * space
+        x0 = measure.x + (0.42 + indent) * space
+        x1 = measure.right - 0.42 * space
+        width = self._w(BARLINE_W)
+        self.canvas.line(x0, y - gap0 / 2, x1, y - gap1 / 2, width, self.theme.ink)
+        self.canvas.line(x0, y + gap0 / 2, x1, y + gap1 / 2, width, self.theme.ink)
+
+    @staticmethod
+    def _wedge_gap(kind: str, ratio: float) -> float:
+        """楔形在 ``ratio`` 处的张口（像素）；crescendo 由 0 张开，diminuendo 反之。"""
+        clamped = max(0.0, min(1.0, float(ratio)))
+        frac = clamped if kind == "crescendo" else 1.0 - clamped
+        return WEDGE_GAP * frac
 
     def _draw_rest(self, cluster: LaidCluster, bottom: float) -> None:
         """休止符：整小节/全音符与二分用横杠，四分用曲线，八分及更短用斜杆 + 旗点。"""

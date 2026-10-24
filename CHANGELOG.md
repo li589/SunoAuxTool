@@ -2,6 +2,51 @@
 
 本项目遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.0.0/) 风格。
 
+## [2.2.0] - 2026-10-24（M3：表现力——演奏法 / 力度 / 摇摆 / 弹性速度）
+
+**主题**：从"打谱"走向"演奏"。同一份清单，音符的**长短、轻重、落点**都可调，
+并且全部同时落在 MIDI（听感）与总谱（读谱）两处。
+
+### 新增
+- **演奏法**（`compose/expression.py`）：`legato/tenuto/staccato/staccatissimo/accent/
+  marcato/spiccato/pizz/arco` 九种，语义是"时值 ×gate + 力度 +Δ + 记号标签"。
+  清单写在 `[[track]] articulation`（全轨默认）或 `[[track.note]] articulation`（逐音覆盖）。
+  `pizz`/`arco` 只做时值与力度近似（换音色需 keyswitch，SF2 不通用，不做假的）。
+- **力度记号**（`[[section]] dynamic`，ppp..fff）：按系数缩放该段力度；
+  省略时由 `energy` 推导（`dynamic_for_energy`），因此老清单自动获得分层力度。
+- **渐强渐弱**（`[[section]] ramp = "cresc"|"dim"`）：段内按音符位置线性插值。
+- **摇摆**（`[song] swing` / `[[track]] swing`，0.5 平直 .. 0.75 三连音）：
+  只写反拍音符的 `offset_ticks`，不动 `start` —— 网格、和声、总谱全不受影响。
+- **弹性速度**（`[[section]] tempo` / `tempo_curve`）：段落级"从当前速度渐变到目标"，
+  合成速度表为 `(段首, 当前, linear)` + `(段末, 目标, step)` 两点，MIDI 速度表可完整还原。
+- `compose build|render|score` 新增 `--swing` / `--timing-ms` / `--velocity-jitter`
+  （`render`/`score` 另补 `--no-humanize`）。
+
+### 变更
+- **人性化改为毫秒口径**：`humanize()` 参数 `timing`（拍比例）→ `timing_ms`（±10ms），
+  `velocity_spread`（相对比例）→ `velocity_jitter`（±8 绝对力度）。
+  毫秒才有"手上"的物理意义：同样 ±10ms，慢歌占比大、快歌占比小。
+  同时移除 `jitter_velocity(accent=...)`——重音归演奏法管。
+- **显式音符也走表现力链**：`[[track.note]]` 手写的轨道此前整轨跳过编排
+  （连摇摆/力度一起跳过）；现在只跳过**生成**，表现力照常施加
+  （"怎么写"与"怎么演奏"是两件事）。`--no-arrange` 仍是完全原样直出。
+- 处理顺序固定为 **摇摆 → 演奏法 → 力度 → 人性化**：摇摆先定位，
+  演奏法改时值/力度，力度整体缩放，人性化抖的是最终力度。
+
+### 谱面（总谱输出）
+- MusicXML 写出 `<articulations>`（staccato/tenuto/accent/strong-accent/
+  staccatissimo/spiccato）、`<dynamics><mf/>`、`<wedge type="crescendo|diminuendo">`
+  + `<offset>` 收口到段末小节末。
+- SVG/PNG 画出：段首力度文字（斜体）、跨小节渐变楔形（按段内等分插值，
+  与力度记号同起时从文字右侧起画）、符头外侧的演奏法记号（圆点/短横/三角/`>`/`^`）。
+- 标记号的两条克制：**只在该轨真正发声的段落打记号**（整段休息的轨道不写，
+  否则 crescendo 楔形会跨过一堆休止符）；**打击轨不写力度记号**。
+- 有记号的谱表在纵向排布时多留 2.4 space 行距，避免与下一行谱表相撞。
+
+### 数字
+- 全树 **2323 例**、覆盖率 **91.34%**；新增 `tests/compose/test_expression.py`（59 例）
+  与 `tests/score/test_expression_marks.py`（14 例）。
+
 ## [2.1.0] - 2026-10-24（M2：每轨独立选音源库 + 跨库响度对齐）
 
 **主题**：让"换音源库"变成可用的日常操作——每条轨道可以选自己的音源库，

@@ -68,6 +68,8 @@ class ScoreNote:
     tie_from_prev: bool = False
     tie_to_next: bool = False
     is_rest: bool = False
+    articulation: str = ""
+    """演奏法（staccato/accent/…），空表示无记号。"""
 
     @property
     def beat_end(self) -> float:
@@ -116,6 +118,12 @@ class ScoreTrack:
     """分谱组名（同名的连续声部在 MusicXML 里用括号连成一个 part-group）。"""
     notes: List[ScoreNote] = field(default_factory=list)
     measures: List[ScoreMeasure] = field(default_factory=list)
+    dynamics: Dict[int, str] = field(default_factory=dict)
+    """力度记号：``{小节号: "mf"}``（在对应小节开头写 ``<dynamics>``）。"""
+    wedges: Dict[int, str] = field(default_factory=dict)
+    """渐变楔形：``{小节号: "crescendo"|"diminuendo"}``（起点）。"""
+    wedge_ends: Dict[int, bool] = field(default_factory=dict)
+    """楔形收口小节：``{小节号: True}``。"""
 
     @property
     def is_transposing(self) -> bool:
@@ -357,6 +365,9 @@ class Score:
             score_track.transpose = int(getattr(track, "transpose", 0) or 0)
             if part_groups:
                 score_track.part_group = _group_of(track.role)
+            _apply_expression_marks(
+                score_track, song, beats_per_measure(time_signature)
+            )
         return score
 
     def parts(self) -> List["Score"]:
@@ -492,6 +503,38 @@ def _group_of(role: str) -> str:
     return _GROUP_BY_ROLE.get(str(role), "")
 
 
+#: 段落渐变 → MusicXML ``<wedge>`` 类型
+_WEDGE_TYPE = {"cresc": "crescendo", "dim": "diminuendo"}
+
+
+def _apply_expression_marks(track: ScoreTrack, song, capacity: float) -> None:
+    """把段落级力度/渐变落成谱面记号（按小节号登记到 ``ScoreTrack``）。
+
+    两条刻意保留的克制：
+
+    1. **只在该轨真正发声的段落打记号**。段落是全局的，但某轨可能整段休息
+       （如 pad 只在副歌进），在空白小节上写 ``<dynamics>`` 会悬在空中、
+       还会让 crescendo 楔形跨过一堆休止符；
+    2. **打击轨不写**。鼓谱的力度靠节奏层表达，写 p/ff 既不合惯例也无音高意义。
+    """
+    from sunoauxtool.compose.expression import dynamic_for_energy
+
+    if track.is_drum:
+        return
+    sounding = {n.measure for n in track.notes if not n.is_rest}
+    for section in getattr(song, "sections", ()) or ():
+        first = int(round(float(section.start) / capacity)) + 1
+        last = first + int(section.bars) - 1
+        if first < 1 or not any(m in sounding for m in range(first, last + 1)):
+            continue
+        track.dynamics[first] = section.dynamic or dynamic_for_energy(section.energy)
+        ramp = str(getattr(section, "ramp", "") or "")
+        wedge = _WEDGE_TYPE.get(ramp)
+        if wedge:
+            track.wedges[first] = wedge
+            track.wedge_ends[last] = True
+
+
 def _build_track(
     *,
     name: str,
@@ -516,6 +559,8 @@ def _build_track(
                 start=float(n.start),
                 duration=duration,
                 velocity=int(getattr(n, "velocity", 64)),
+                # 演奏法只影响记谱记号；旧模型（NoteSequence）没有该字段，故用 getattr
+                articulation=str(getattr(n, "articulation", "") or ""),
             )
         )
 
@@ -630,6 +675,8 @@ def _split_at_barlines(note: ScoreNote, capacity: float, bars: int) -> List[Scor
                 beat_in_measure=cursor - (measure - 1) * capacity,
                 tie_from_prev=bool(out),                       # 非首片
                 tie_to_next=remaining - span > _EPS,           # 后面还有
+                # 记号只挂在音头所在片段上：延音线之后的片段不该重复写 staccato
+                articulation=note.articulation if not out else "",
             )
         )
         cursor += span
@@ -646,6 +693,7 @@ def _split_at_barlines(note: ScoreNote, capacity: float, bars: int) -> List[Scor
                 voice=note.voice,
                 measure=bars,
                 beat_in_measure=0.0,
+                articulation=note.articulation,
             )
         )
     return out

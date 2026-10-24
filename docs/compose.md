@@ -63,6 +63,7 @@ meter = "4/4"                 # 名义拍号；分母必须是 2 的幂
 seed = 20261024               # PR-D 编曲引擎的确定性种子
 pickup_beats = 0.0            # 可选：弱起拍（首段小节网格从弱起起点算起）
 bars = 32                     # 可选：与段落 bars 合计交叉校验
+swing = 0.0                   # 可选（2.2）：全曲摇摆比例 0.5 平直 .. 0.75 三连音
 
 [[tempo]]                     # 可选；首点 beat 必须为 0
 beat = 0
@@ -75,6 +76,10 @@ name = "主歌"
 bars = 8
 energy = 0.45                 # 0..1，驱动配器密度（PR-D 生效）
 progression = ["Dm", "Bb", "F", "C"]   # 每小节一个和弦
+dynamic = "mp"                # 可选（2.2）：段首力度 pp..fff；省略按 energy 推
+ramp = "cresc"                # 可选（2.2）：段内渐变 cresc | dim
+tempo = 84                    # 可选（2.2）：该段从当前速度渐变到 84
+tempo_curve = "linear"        # 可选（2.2）：linear（渐变）| step（段首直接换）
 
 [[track]]
 id = "piano"                  # 唯一
@@ -84,9 +89,12 @@ program = 0                   # 显式 GM 音色号（0-127）；`instrument` �
 bank = "gm"                   # 音源库 id（2.1 起生效）
 channel = 0                   # 可选：省略则自动分配（鼓固定 9）
 octave = 4
+transpose = 0                 # 可选：移调半音（记谱用，2.0 起生效）
 range = [40, 96]              # 可选：音域，越界即报错
 sections = ["verse", "chorus"]        # 参与段落；省略=全曲
 muted = false
+articulation = "staccato"     # 可选（2.2）：全轨默认演奏法（见 §11）
+swing = 0.62                  # 可选（2.2）：本轨摇摆比例（覆盖 song.swing）
 mix = { gain_db = -6.0, pan = -0.15, reverb_send = 0.18 }
 density = 0.6                 # 可选（PR-D）
 groove = "pop-half-time"      # 可选（PR-D）
@@ -265,7 +273,58 @@ sunoaux soundbank verify --all         # 批量结构校验；有失败则退出
 - `doctor` 新增"音源库"一行：`✅ 2/2 套可用（colombogmgs2, generaluser-gs）`。
 - 错误码 **41**：未注册 id、文件缺失、体积异常、非 RIFF/sfbk 容器。
 
-## 9. 与旧命令的关系
+## 9. 表现力：演奏法 / 力度 / 摇摆（2.2 / M3）
+
+同一个音符写"多长、多响、落在网格的哪里"，决定了它像不像被演奏出来的。2.2 把
+这四件事都做成清单字段，且**全部落在 MIDI 与总谱两处**：
+
+| 能力 | 清单字段 | 写进 MIDI | 写进总谱 |
+|---|---|---|---|
+| 演奏法 | `[[track]] articulation` / `[[track.note]] articulation` | 时值 ×gate、力度 +Δ、`articulation` 标签 | MusicXML `<articulations>`；SVG 记号 |
+| 力度记号 | `[[section]] dynamic` | 力度 ×系数（p 0.55 / mf 0.80 / ff 1.05） | `<dynamics><mf/>` + SVG 段首文字 |
+| 渐强渐弱 | `[[section]] ramp` | 段内按音符位置线性插值 | `<wedge type="crescendo|diminuendo">` + 谱面楔形 |
+| 摇摆 | `[song] swing` / `[[track]] swing` | 只改反拍的 `offset_ticks` | 不改谱面（网格仍是直的） |
+| 人性化 | `--timing-ms` / `--velocity-jitter` | 每音 ±ms 时序、±力度 | 不改谱面 |
+
+**演奏法表**（`compose.expression.ARTICULATIONS`）：
+
+| 名字 | 时值 | 力度 | 谱面记号 |
+|---|---|---|---|
+| `legato` | ×1.0 | ±0 | — |
+| `tenuto` | ×1.0 | +2 | 短横 |
+| `staccato` | ×0.5 | ±0 | 圆点 |
+| `staccatissimo` | ×0.3 | +2 | 小三角 |
+| `accent` | ×1.0 | +14 | `>` |
+| `marcato` | ×0.7 | +18 | `^`（strong-accent） |
+| `spiccato` | ×0.35 | +6 | 圆点 |
+| `pizz` / `arco` | ×0.55 / ×1.0 | +6 / ±0 | 圆点 / — |
+
+`pizz`/`arco` 只做**时值+力度**的近似——真正的换音色要 keyswitch 或换 program，
+SoundFont 并不通用，所以这里不假装能做到。
+
+**处理顺序**（改了顺序结果就不同，`arranger._apply_expression` 固定为）：
+
+```
+摇摆 → 演奏法 → 力度 → 人性化
+```
+
+摇摆先动 `offset_ticks`（不动 `start`），演奏法改时值与力度，力度再整体缩放，
+最后人性化抖动的是"最终力度"而不是被后续修正吃掉。
+
+**三个刻意的克制度**：
+
+1. **摇摆不改 `start`**。摇摆只写 `offset_ticks`，节拍网格、和声、总谱全都不受影响，
+   MIDI 听感是摇摆的、谱面仍是干净的八分音符——这是"网格可读 + 演奏人性化"的折中；
+2. **渐变只在段内插值**。`ramp` 的终点是段末，不做跨段长渐变（跨段就写成两段）；
+   段落 `tempo` 同理：`(段首, 当前速度, linear)` + `(段末, 目标, step)` 两点；
+3. **没声的段落不标记号**。段落是全局的，但某轨可能整段休息（pad 只在副歌进），
+   在空白小节写 `<dynamics>` 会悬在空中；打击轨一律不写力度记号。
+
+**可以从 MIDI 反推**：速度表（含渐变）在 `compose build` 后完整写在
+`out/<曲名>/arrangement.json` 与 SMF 的 set-tempo 事件里；演奏法的时值/力度是
+可量测的（对比同清单加/不加 `articulation` 的 `duration` 与 `velocity`）。
+
+## 10. 与旧命令的关系
 
 | 场景 | 用哪个 |
 |---|---|
@@ -275,15 +334,15 @@ sunoaux soundbank verify --all         # 批量结构校验；有失败则退出
 
 旧命令在 2.0 全周期保留；`compose` 不改变它们的行为。
 
-## 10. 后续（按里程碑推进）
+## 11. 后续（按里程碑推进）
 
 | PR | 内容 | 用户可见变化 |
 |---|---|---|
 | ~~D~~ | ~~Arranger v1~~ | 已交付：清单只写 `role`/`energy` 就能生成音符 |
 | ~~E~~ | ~~渲染 v2（后端协议 / 分轨 / 混音）~~ | 已交付：`compose render` → mix + stems/ + midi/ |
 | ~~F~~ | ~~总谱 v2（移调 / 分谱组 / 分谱）~~ | 已交付：`compose score` → 总谱 + 分谱 |
-| F+ | 大谱表（钢琴两行）、分页、演奏记号 | 更接近出版级总谱 |
-| 2.2 | M3 表现力：演奏法/力度记号/摇摆进 MIDI 与总谱 | 更像"演奏"而不是"打谱" |
+| F+ | 大谱表（钢琴两行）、分页、更多记号 | 更接近出版级总谱 |
+| ~~2.2~~ | ~~M3 表现力：演奏法/力度/摇摆/弹性速度~~ | 已交付：`articulation`/`dynamic`/`ramp`/`swing` 进 MIDI 与总谱 |
 | 2.3 | M4 AI 编曲：LLM 产出清单 → 校验 → 渲染闭环 | 自然语言到成品 |
 | ~~G~~ | ~~SoundBank 注册表 + doctor~~ | 已交付：`soundbank list/info/verify` |
 | ~~2.1~~ | ~~每轨独立选音源库 + 跨库响度对齐~~ | 已交付：`[[track]] bank`、`--bank`、按库对齐 |

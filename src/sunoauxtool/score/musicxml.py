@@ -310,6 +310,7 @@ def _build_part(
             _emit_attributes(node, score, track)
             if opts.include_tempo:
                 _emit_tempo(node, score.bpm)
+        _emit_expression(node, track, measure.index, _to_divisions(measure.duration_beats))
         _emit_measure_notes(node, measure, track, key_acc=key_acc, flats=flats)
     return part
 
@@ -354,6 +355,37 @@ def _emit_tempo(node: ET.Element, bpm: int) -> None:
     ET.SubElement(metronome, "beat-unit").text = "quarter"
     ET.SubElement(metronome, "per-minute").text = str(int(bpm))
     ET.SubElement(direction, "sound", {"tempo": str(int(bpm))})
+
+
+def _emit_expression(
+    node: ET.Element, track: ScoreTrack, measure_index: int, divisions: int
+) -> None:
+    """小节开头的力度记号与渐变楔形（``<direction>``）。
+
+    位置约定：``<direction>`` 出现在小节第一个 ``<note>`` 之前，即"小节起点"。
+    唯一例外是**楔形收口**——它必须落在段落最后一小节的**小节末**，因此带
+    ``<offset>=divisions``（``<direction>`` 自身不推进时间游标，offset 是相对
+    当前位置的延后量）。若把 stop 放在下一小节开头，导入器会把记号画到下一小节里，
+    跨段落时就会串到别人的谱面上。
+    """
+    dynamic = track.dynamics.get(measure_index)
+    if dynamic:
+        direction = ET.SubElement(node, "direction", {"placement": "below"})
+        direction_type = ET.SubElement(direction, "direction-type")
+        marks = ET.SubElement(direction_type, "dynamics")
+        ET.SubElement(marks, dynamic)  # <mf/> / <p/> …（元素名即力度记号）
+
+    wedge = track.wedges.get(measure_index)
+    if wedge:
+        direction = ET.SubElement(node, "direction", {"placement": "below"})
+        direction_type = ET.SubElement(direction, "direction-type")
+        ET.SubElement(direction_type, "wedge", {"type": wedge, "number": "1"})
+
+    if track.wedge_ends.get(measure_index):
+        direction = ET.SubElement(node, "direction", {"placement": "below"})
+        direction_type = ET.SubElement(direction, "direction-type")
+        ET.SubElement(direction_type, "wedge", {"type": "stop", "number": "1"})
+        ET.SubElement(direction, "offset").text = str(int(divisions))
 
 
 def _clef_signs(track: ScoreTrack) -> Tuple[str, str]:
@@ -551,12 +583,37 @@ def _emit_note(
         ET.SubElement(element, "dot")
     if glyph is not None:
         ET.SubElement(element, "accidental").text = _ACCIDENTAL_NAMES[glyph]
-    if tie_stop or tie_start:
+    mark = "" if note.is_rest else _articulation_element(note.articulation)
+    if tie_stop or tie_start or mark:
         notations = ET.SubElement(element, "notations")
         if tie_stop:
             ET.SubElement(notations, "tied", {"type": "stop"})
         if tie_start:
             ET.SubElement(notations, "tied", {"type": "start"})
+        if mark:
+            ET.SubElement(
+                ET.SubElement(notations, "articulations"), mark
+            )
+
+
+#: 演奏法 → MusicXML ``<articulations>`` 元素名（首次使用时从 compose.expression 同步）
+_ARTICULATION_ELEMENTS: Optional[Dict[str, str]] = None
+
+
+def _articulation_element(name: str) -> str:
+    """演奏法名 → ``<articulations>`` 子元素名（未知/无记号返回空串）。
+
+    映射表的唯一真源是 ``compose.expression.ARTICULATIONS``（含 marcato→strong-accent
+    这类义变名）；这里只在首次调用时读一次并缓存，避免逐音符跨包 import。
+    """
+    global _ARTICULATION_ELEMENTS
+    if _ARTICULATION_ELEMENTS is None:
+        from sunoauxtool.compose.expression import ARTICULATIONS
+
+        _ARTICULATION_ELEMENTS = {
+            key: spec.musicxml for key, spec in ARTICULATIONS.items() if spec.musicxml
+        }
+    return _ARTICULATION_ELEMENTS.get(str(name or "").strip().lower(), "")
 
 
 def _spell(note: ScoreNote, flats: bool, transpose: int = 0) -> Tuple[str, int, int]:
