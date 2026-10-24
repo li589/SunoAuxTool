@@ -1,13 +1,13 @@
 # compose：代码驱动的多轨编曲（2.0）
 
-> 状态：**2.1.0 已交付**（2.0 全部能力 + 每轨独立选音源库 + 跨库响度对齐）。
-> 命令面：`compose init / validate / build / render / score` + `soundbank list / info / verify`。
+> 状态：**2.3.0 已交付**（2.0 内核 + 2.1 音源体系 + 2.2 表现力 + 2.3 AI 编曲闭环）。
+> 命令面：`compose init / validate / build / render / score / ai` + `soundbank list / info / verify`。
 
 `compose` 是"数字轴"入口：一份 `song.toml`（或 Python DSL）完整描述一首曲子，
 构建出**全保真 MIDI**（format 1，含速度表/拍号/调性/CC/音色库）与**编排快照**，
 零交互、字节级可复现。
 
-## 1. 五个命令
+## 1. 六个命令
 
 ```bash
 sunoaux compose init night                 # 生成 night/song.toml（8 轨 6 段模板，可直接构建）
@@ -16,6 +16,7 @@ sunoaux compose build  night/song.toml     # -> out/night/night.mid + arrangemen
 sunoaux compose render night/song.toml     # -> out/night/night.wav + stems/ + midi/
 sunoaux compose score  night/song.toml --format svg,musicxml --parts
                                           # -> out/night/score/ + score/parts/
+sunoaux compose ai     "一句话需求" --build  # LLM 生成清单 + 校验修复闭环（见 §11）
 ```
 
 | 命令 | 关键选项 | 产物 |
@@ -334,7 +335,49 @@ SoundFont 并不通用，所以这里不假装能做到。
 
 旧命令在 2.0 全周期保留；`compose` 不改变它们的行为。
 
-## 11. 后续（按里程碑推进）
+## 11. AI 编曲闭环（2.3 / M4）
+
+一句话需求 → LLM 写 `song.toml` → **既有校验裁决** → 修复循环 → 落盘（可直连 build）。
+
+```bash
+# OpenAI 兼容接口（默认）：按环境变量取凭证
+export SUNOAUX_AI_API_KEY="sk-..."
+export SUNOAUX_AI_BASE_URL="https://api.openai.com/v1"   # 可选
+export SUNOAUX_AI_MODEL="gpt-4o-mini"                    # 可选
+
+sunoaux compose ai "一首 92 BPM 的 synthwave，A 小调，前奏-主歌-副歌，副歌加渐强" \
+    -o ai/song.toml --build
+
+# 没有 key 时离线自检（内置示例清单，走完整校验+构建链路）
+sunoaux compose ai "示例" --provider fake -o ai/song.toml --json
+```
+
+**三条设计铁律**：
+
+1. **LLM 只负责"写清单"，不负责"写音乐"**。模型产出的是 `song.toml` 文本，
+   正确性由既有的 `SongSpec` 校验（错误码 40/44 + JSON Pointer）裁决——
+   校验不通过就是不合格，AI 说的不算。这与 Arranger 的确定性种子是同一种承诺。
+2. **修复闭环确定性可重放**：每一轮把上一稿 + 结构化错误列表喂回模型
+   （temperature 固定 0），最多 `--rounds`（默认 3）轮；耗尽仍非法 →
+   **错误码 46**（附最后一轮错误）。`--print-prompt` 可打印最后一轮提示词，
+   用于调试提示词质量。
+3. **零新依赖**：OpenAI 兼容 `/chat/completions` 走 stdlib `urllib`（延迟导入）；
+   `--provider fake` 内置示例清单，CI/离线两用。
+
+**Python 注入**（测试/自定义后端）：
+
+```python
+from sunoauxtool.compose.ai import generate_spec, FakeLLMClient
+result = generate_spec(brief, MyClient(...), max_rounds=3)
+result.spec        # 已通过校验的 SongSpec
+result.rounds      # 每轮的 prompt/清单/错误记录（可审计）
+```
+
+> 已知边界：`SongSpec.from_dict` 每轮只报**第一条**错误（结构先于语义），
+> 所以复杂清单可能吃满 3 轮才收敛——这正是闭环存在的意义；错误码 46 的
+> detail 会带上最后一轮的全部错误，方便人工兜底。
+
+## 12. 后续（按里程碑推进）
 
 | PR | 内容 | 用户可见变化 |
 |---|---|---|
@@ -343,6 +386,6 @@ SoundFont 并不通用，所以这里不假装能做到。
 | ~~F~~ | ~~总谱 v2（移调 / 分谱组 / 分谱）~~ | 已交付：`compose score` → 总谱 + 分谱 |
 | F+ | 大谱表（钢琴两行）、分页、更多记号 | 更接近出版级总谱 |
 | ~~2.2~~ | ~~M3 表现力：演奏法/力度/摇摆/弹性速度~~ | 已交付：`articulation`/`dynamic`/`ramp`/`swing` 进 MIDI 与总谱 |
-| 2.3 | M4 AI 编曲：LLM 产出清单 → 校验 → 渲染闭环 | 自然语言到成品 |
+| ~~2.3~~ | ~~M4 AI 编曲：LLM 产出清单 → 校验 → 渲染闭环~~ | 已交付：`compose ai`（修复循环 + 错误码 46，OpenAI 兼容零依赖） |
 | ~~G~~ | ~~SoundBank 注册表 + doctor~~ | 已交付：`soundbank list/info/verify` |
 | ~~2.1~~ | ~~每轨独立选音源库 + 跨库响度对齐~~ | 已交付：`[[track]] bank`、`--bank`、按库对齐 |

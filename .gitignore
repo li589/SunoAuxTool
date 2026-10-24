@@ -76,3 +76,7 @@ sunoauxtool.db
 # ===== 本地遗留：旧独立包 DownloadHelper（out/ 为主理人产出目录，永不入库）=====
 src/DownloadHelper/
 src/*.egg-info/
+
+# compose build 默认产物目录
+out/
+ai/

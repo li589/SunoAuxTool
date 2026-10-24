@@ -297,7 +297,8 @@ sunoauxtool ai diffrhythm --prompt "slow ballad" --lyrics "第一句词" --durat
 > [docs/refactor-2.0-multitrack.md](docs/refactor-2.0-multitrack.md)，
 > 已交付的 `compose` 清单/DSL/CLI 用法见 [docs/compose.md](docs/compose.md)。
 > 现状：2.0 多轨内核 → 2.1 每轨独立音源库 + 跨库响度对齐 → 2.2 表现力
-> （演奏法/力度记号/渐强渐弱/摇摆/段落弹性速度）；下一步 2.3 为 AI 编曲闭环。
+> （演奏法/力度记号/渐强渐弱/摇摆/段落弹性速度）→ 2.3 AI 编曲闭环
+> （`compose ai "一句话需求"` → LLM 清单 → 校验修复循环 → 直连 build）。
 
 ---
 

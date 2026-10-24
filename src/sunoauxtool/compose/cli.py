@@ -7,6 +7,7 @@
                       `--dry-run` 只打印计划；`--no-arrange` 只用手写音符
     compose render    song.toml → 分轨 WAV + 混音成品（每轨独立渲染后混音）
     compose score     song.toml → 多声部总谱 SVG/PNG/MusicXML（--parts 出分谱）
+    compose ai        一句话需求 → LLM 生成 song.toml → 校验修复闭环（2.3 M4）
 """
 from __future__ import annotations
 
@@ -18,6 +19,7 @@ from typing import Optional
 import typer
 
 from sunoauxtool.commands.helpers import _guard, _load_config
+from sunoauxtool.compose.ai import client_from_env, generate_spec
 from sunoauxtool.compose.arranger import ArrangeOptions, arrange
 from sunoauxtool.compose.render import (
     FORMATS,
@@ -465,3 +467,62 @@ def score(
     typer.echo(f"已导出总谱 → {out_dir}")
     for line in describe_score(result):
         typer.echo(f"  {line}")
+
+
+@app.command("ai")
+@_guard
+def ai(
+    brief: str = typer.Argument(..., help="一句话编曲需求（风格/情绪/结构/速度等）"),
+    out: Optional[Path] = typer.Option(
+        None, "--out", "-o", help="输出 song.toml 路径（默认 ai/song.toml）"
+    ),
+    provider: Optional[str] = typer.Option(
+        None, "--provider",
+        help="fake（内置示例，离线自检）/ 留空按 SUNOAUX_AI_PROVIDER（默认 openai 兼容）",
+    ),
+    model: Optional[str] = typer.Option(
+        None, "--model", help="模型名（默认取 SUNOAUX_AI_MODEL）"
+    ),
+    rounds: int = typer.Option(3, "--rounds", min=1, max=8, help="校验修复最大轮数"),
+    title: Optional[str] = typer.Option(None, "--title", help="覆盖曲名（写入 [song].title）"),
+    build_after: bool = typer.Option(False, "--build", help="生成后立即 compose build"),
+    print_prompt: bool = typer.Option(
+        False, "--print-prompt", help="打印最后一轮提示词（调试提示词质量）"
+    ),
+    as_json: bool = typer.Option(False, "--json", help="JSON 输出（AI/CI 友好）"),
+) -> None:
+    """AI 编曲闭环：需求 → LLM 写 song.toml → 校验修复 → 落盘（错误码 46）。"""
+    if title:
+        brief = f"{brief.strip()}\n曲名必须是：{title}（[song].title 原样使用）"
+    client = client_from_env(provider, model)
+    result = generate_spec(brief, client, max_rounds=rounds)
+
+    out_path = Path(out) if out is not None else Path("ai") / "song.toml"
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    out_path.write_text(result.toml_text, encoding="utf-8")
+
+    if print_prompt:
+        typer.echo("[last prompt]\n" + result.rounds[-1].prompt, err=True)
+    if as_json:
+        typer.echo(json.dumps({
+            "ok": True,
+            "path": str(out_path),
+            "provider": result.provider,
+            "model": result.model,
+            "rounds": result.attempts,
+            "fixed_errors": result.fixed_errors,
+            "sections": len(result.spec.sections),
+            "tracks": len(result.spec.tracks),
+        }, ensure_ascii=False))
+    else:
+        typer.echo(f"已生成 {out_path}（{result.model} / {result.provider}）")
+        for line in result.describe():
+            typer.echo(f"  {line}")
+        typer.echo(f"  下一步：sunoaux compose build {out_path}")
+
+    if build_after:
+        typer.echo("")
+        build(
+            path=out_path, out=None, dry_run=False, no_arrange=False,
+            no_humanize=False, swing=None, timing_ms=10.0, velocity_jitter=8,
+        )

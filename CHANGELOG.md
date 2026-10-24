@@ -2,6 +2,29 @@
 
 本项目遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.0.0/) 风格。
 
+## [2.3.0] - 2026-10-24（M4：AI 编曲闭环——自然语言到 song.toml）
+
+**主题**：`compose ai "一句话需求"` → LLM 写清单 → **既有校验裁决** → 修复循环 → 落盘。
+LLM 只负责"写清单"，不负责"写音乐"：正确性由 SongSpec 校验（40/44 + JSON Pointer）说了算。
+
+### 新增
+- `compose/ai.py`：`generate_spec()` 生成-校验-修复循环（默认 3 轮，每轮把上一稿 +
+  结构化错误喂回模型，temperature 固定 0，可审计可重放）；`GenerateResult.rounds`
+  逐轮记录 prompt/清单/错误。轮次耗尽仍非法 → **错误码 46**（附最后一轮错误）。
+- **OpenAI 兼容客户端**（stdlib `urllib`，零新依赖）：`SUNOAUX_AI_API_KEY` /
+  `SUNOAUX_AI_BASE_URL`（默认 api.openai.com/v1）/ `SUNOAUX_AI_MODEL`；
+  HTTP 失败/响应无 TOML/响应缺 choices → 46（kind: request / bad_response / no_client）。
+- `--provider fake`：内置示例清单（5 轨 3 段，含 2.2 的 dynamic/ramp/articulation/swing），
+  无 key 也能走完"生成→校验→build"全链路（离线自检 / CI / 测试注入三用）。
+- `compose ai` 命令：`--rounds`（1-8）/ `--title` / `--build`（生成后直连 compose build）/
+  `--print-prompt`（调试提示词）/ `--json`（AI/CI 友好）。
+- 错误码 **46** = AI 编曲生成失败（未配置/请求失败/响应无 TOML/轮次耗尽）。
+
+### 数字
+- 全树 2345 例、覆盖率 ≥91%；新增 `tests/compose/test_ai.py`（22 例：
+  闭环收敛/轮次预算/凭证缺失/请求形状/HTTP 错误映射/CLI 端到端）。
+
+
 ## [2.2.1] - 2026-10-24（修复：高音谱号字形）
 
 ### 修复

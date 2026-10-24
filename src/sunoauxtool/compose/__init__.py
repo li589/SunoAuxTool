@@ -17,8 +17,10 @@
     rhythm.py         groove → 鼓组图案
     orchestration.py  角色 → 乐器/音域/力度、能量矩阵
     humanize.py       力度抖动 + 微时序
+    expression.py     表现力：演奏法/力度记号/摇摆（2.2）
+    ai.py             AI 编曲闭环：需求 → LLM 清单 → 校验修复（2.3）
     rng.py            确定性种子派生（blake2b）
-    cli.py            `sunoaux compose init/validate/build`
+    cli.py            `sunoaux compose init/validate/build/render/score/ai`
 """
 
 from __future__ import annotations

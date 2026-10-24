@@ -11,7 +11,7 @@ SunoAuxTool/
 │   │   ├── unlock/             #   通用解密：kwm / kgm / qmc + ekey_source
 │   │   └── suno_dl.py          #   Suno 官方明文下载三段式（R8，错误码 30-34）
 │   ├── dsp/                    # DSP 算子（norm / loudnorm / reverb / …）
-│   ├── compose/                # 编曲域（2.0 PR-B/C/D）：song/spec/api/arranger/harmony/melody/rhythm/orchestration/humanize/rng/cli
+│   ├── compose/                # 编曲域（2.0 PR-B/C/D）：song/spec/api/arranger/harmony/melody/rhythm/orchestration/humanize/expression/ai/rng/cli
 │   ├── export/                 # 导出（音频封装 / metadata）
 │   ├── generators/             # 旋律 / MIDI 程序化生成
 │   ├── meta/                   # 标签清洗子包（R9）：sanitize + 专属异常（错误码 35-36）
