@@ -32,6 +32,7 @@ from sunoauxtool.score.svg import (
     QUARTER_REST,
     STAFF_LINE_W,
     STEM_W,
+    TREBLE_CLEF,
     SvgOptions,
     SvgTheme,
     WHOLE_RX,
@@ -325,7 +326,11 @@ def test_half_note_head_is_hollow():
 
 def test_treble_clef_drawn_as_stroke_path():
     layout, svg = render()
-    assert "M -0.50,5.45 " in svg           # TREBLE_CLEF 起点
+    # 字形路径原样出现，且按描边（非填充）绘制——卷曲是单笔画，填充会糊成黑块
+    assert TREBLE_CLEF in svg
+    seg = svg[svg.index(TREBLE_CLEF):svg.index(TREBLE_CLEF) + len(TREBLE_CLEF) + 140]
+    assert 'fill="none"' in seg
+    assert 'stroke-linejoin="round"' in seg
     trebles = [s for s in layout.systems[0].staffs if s.clef == "treble"]
     assert trebles
     assert layout.systems[0].staffs[1].clef == "bass"
