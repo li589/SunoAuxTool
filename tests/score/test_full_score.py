@@ -205,3 +205,45 @@ class TestMusicXml:
         node = root.find(".//transpose")
         assert node is not None
         assert node.findtext("chromatic") == str(transpose)
+
+
+class TestStemGeometry:
+    """回归：符干锚点必须是中线，不能是谱表顶线（否则低音符干跨整条谱表）。"""
+
+    def _clusters(self, pitches: list[int]):
+        from sunoauxtool.models.notes import Note, NoteSequence
+        from sunoauxtool.score.layout import layout_score
+
+        seq = NoteSequence(bpm=120, key="C major", time_signature="4/4", bars=1)
+        seq.add_track("melody", program=0, channel=0, notes=[
+            Note(pitch=pitch, start=index * 1.0, duration=1.0, velocity=80)
+            for index, pitch in enumerate(pitches)
+        ])
+        laid = layout_score(Score.from_sequence(seq, title="t", bars=1))
+        return [c for c in laid.systems[0].staffs[0].measures[0].clusters
+                if not c.is_rest and c.step_offsets]
+
+    def test_low_note_stem_is_three_and_half_spaces(self) -> None:
+        """C4（高音谱下一线之下）的符干应恰好 3.5 格，而不是拉到谱表顶线。"""
+        clusters = self._clusters([60])
+        cluster = clusters[0]
+        assert cluster.stem_up is True
+        assert cluster.stem_len == pytest.approx(3.5)
+
+    def test_stem_tip_stays_near_notehead(self) -> None:
+        """符干末端距符头不超过 3.5 格（低音不再跨整条谱表）。"""
+        for cluster in self._clusters([55, 57, 60, 62]):
+            top = max(cluster.step_offsets)
+            assert cluster.stem_len * 2 <= (top - min(cluster.step_offsets)) + 7 + 1e-9
+
+    def test_stem_length_follows_middle_line_rule(self) -> None:
+        """不变式：符干 = 3.5 格，且远端必须越过中线（两端对称，锚点都是中线 0）。"""
+        for pitch in (55, 60, 67, 72, 79):
+            cluster = self._clusters([pitch])[0]
+            lo, hi = min(cluster.step_offsets), max(cluster.step_offsets)
+            if cluster.stem_up:
+                expected = max(hi + 7, 0) - lo
+            else:
+                expected = hi - min(lo - 7, 0)
+            assert cluster.stem_len * 2 == pytest.approx(expected), (pitch, cluster.step_offsets)
+            assert cluster.stem_len >= 3.5 - 1e-9

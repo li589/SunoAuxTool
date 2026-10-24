@@ -833,14 +833,15 @@ def _layout_measure_content(
     for c, up in zip(built, natural_dir):
         c.stem_up = group_dir.get(c.beam_group, up) if c.beam_group is not None else up
 
-    # --- 4) 符干长度：至少 3.5 格，且必须伸到中线之外 ---
+    # --- 4) 符干长度：3.5 格（= 7 个音级半步）起，且至少伸到中线 ---
+    # 锚点必须是**中线（0）**，不能是谱表顶线（8）：后者会把低音的符干拉长到跨整条谱表。
     for c in built:
         if c.is_rest:
             c.stem_len = 0.0
             continue
         lo, hi = min(c.step_offsets), max(c.step_offsets)
         if c.stem_up:
-            tip = max(hi + 7, 8)      # 3.5 格 = 7 个音级半步
+            tip = max(hi + 7, 0)      # 3.5 格；低音至少到中线
             c.stem_len = (tip - lo) / 2.0
         else:
             tip = min(lo - 7, 0)

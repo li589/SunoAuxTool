@@ -171,3 +171,17 @@ class TestVoiceChord:
         left = voice_chord(parse_chord("G7"), low=50, high=74)
         right = voice_chord(parse_chord("G7"), low=50, high=74)
         assert left == right
+
+
+class TestVoicingSpread:
+    def test_chords_stay_within_octave(self) -> None:
+        """和弦排列默认不超过一个八度（谱面上不会出现跨谱表长符干）。"""
+        for symbol in ("Dm", "Bb", "F", "C", "G7", "Bbmaj7", "Am7"):
+            voicing = voice_chord(parse_chord(symbol), low=52, high=72)
+            assert voicing[-1] - voicing[0] <= 12, (symbol, voicing)
+
+    def test_wide_spread_allowed_when_needed(self) -> None:
+        """音域过窄时可放宽（不抛错，仍覆盖全部和弦音）。"""
+        voicing = voice_chord(parse_chord("Dm"), low=60, high=64, max_spread=2)
+        assert voicing
+        assert {pitch % 12 for pitch in voicing} <= {2, 5, 9}

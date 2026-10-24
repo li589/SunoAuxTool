@@ -214,7 +214,7 @@ def voice_chord(
     high: int,
     voices: int | None = None,
     previous: Sequence[int] | None = None,
-    max_spread: int = 16,
+    max_spread: int = 12,
 ) -> list[int]:
     """把和弦排成 ``voices`` 个音的密集排列（可选平滑声部连接）。
 
@@ -226,7 +226,7 @@ def voice_chord(
         low / high: 允许的音域（MIDI）。
         voices: 声部数；``None`` 取和弦音数（三和弦 3 声部）。
         previous: 上一和弦的排列（用于声部平滑）。
-        max_spread: 允许的最大跨度（半音）。
+        max_spread: 期望的最大跨度（半音，默认 12 = 一个八度）；超出的排列会被惩罚。
 
     Returns:
         升序音高列表。区间内找不到合适排列时退化为根音+邻近和弦音。
@@ -244,7 +244,9 @@ def voice_chord(
         missing = [pc for pc in chord.pitch_classes if pc not in present]
         cost = 10.0 * len(missing)
         if _spread(combo) > max_spread and len(combo) > 1:
-            cost += 0.5 * (_spread(combo) - max_spread)
+            # 超过一个八度的密集排列在谱面上会变成"跨谱表长符干"，且听感发散：
+            # 用较陡的惩罚把和弦压在 max_spread 以内（找不到更紧的才让步）。
+            cost += 1.5 * (_spread(combo) - max_spread)
         # 轻微向音域中部靠拢：避免全部声部挤在音域下缘
         cost += 0.15 * abs((combo[0] + combo[-1]) / 2.0 - center)
         if previous:
