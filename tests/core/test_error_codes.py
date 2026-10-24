@@ -44,20 +44,21 @@ def test_batch_failed_error_code_9():
 def test_error_codes_table_complete():
     """错误码表：0-9 主干连续 + 10-14（video）+ 15/16（DSP）+ 20-24（download）
     + 25/26（API 源）+ 27-29（unlock）+ 30-34（suno-dl，R8）+ 35/36（meta，R9）
-    + 45（midi 通道，2.0 PR-A）+ 40/44（compose 清单，2.0 PR-C）+ 42/43（渲染，PR-E）。
+    + 45（midi 通道，2.0 PR-A）+ 40/44（compose 清单，2.0 PR-C）+ 42/43（渲染，PR-E）+ 41（音源，PR-G）。
 
     1.4.6 B5：video/download 两段实际在用但曾漏登记（errors 命令与文档不完整）。
     1.8.0：补登记 unlock 段 27-29（1.6.3 起在用但曾漏登记）与 suno-dl 段 30-34。
     1.9.0：登记 meta 段 35-36。
     2.0 PR-A：登记 midi 通道段 45（40-44 留给 compose 编曲）。
     2.0 PR-C：登记 compose 段 40（语义）/44（结构）。
-    2.0 PR-E：登记渲染段 42（后端不可用）/43（分轨或混音失败）——41 留给 2.1 音源注册表。
+    2.0 PR-E：登记渲染段 42（后端不可用）/43（分轨或混音失败）。
+    2.0 PR-G：登记音源段 41（音源缺失或校验失败）。
     """
     codes = [c for c, _n, _d in ERROR_CODES]
     assert codes[:10] == list(range(10))
     assert set(codes) == set(range(10)) | set(range(10, 15)) | {15, 16} | set(
         range(20, 25)
-    ) | {25, 26} | set(range(27, 37)) | {40, 42, 43, 44, 45}
+    ) | {25, 26} | set(range(27, 37)) | {40, 41, 42, 43, 44, 45}
 
 
 def test_error_codes_video_and_download_segments():

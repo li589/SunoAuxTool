@@ -663,8 +663,10 @@ CI 注意：音频渲染用 2 小节短 fixture；SF2 走 LFS，checkout 后 `gi
 > - PR-E `render/{backend,mixer,exceptions}.py` + `compose/render.py`（3f49ae6）：
 >   后端协议、流式分轨混音（balance 声像）、每轨独立渲染 → stems + mix；45 例。
 > - PR-F `score/model.py`（transpose/part_group/from_song/parts）、`score/musicxml.py`
->   （`<transpose>`/`<part-group>`/记谱音高）、`compose/score.py` + `compose score`（本阶段）：
+>   （`<transpose>`/`<part-group>`/记谱音高）、`compose/score.py` + `compose score`（5141e51）：
 >   移调全链透传、分谱组括号、逐声部分谱；25 + 21 例。
+> - PR-G `soundbank/{registry,cli,exceptions}.py` + `doctor` 音源库行（本阶段）：
+>   扫描登记、结构校验、`soundbank list/info/verify`、错误码 41；43 例。
 
 - [x] `midi/` 包：SMF type 1 往返测试全绿（含 3 点速度表、拍号变化、CC、鼓轨）。
 - [x] `Song.validate()` 覆盖 6 类不变量，错误码 40 可读。
@@ -676,6 +678,6 @@ CI 注意：音频渲染用 2 小节短 fixture；SF2 走 LFS，checkout 后 `gi
 - [~] `score --full`：分谱组/移调/分谱已交付（`compose score --parts`，MusicXML 校验通过）；
       大谱表（钢琴两行）与分页留待 F+。
 - [x] 旧命令回归：`generate midi`/`pipeline`/`render` 输出与 1.9.1 一致（根套件全绿）。
-- [~] 错误码 40–45：40/42/43/44/45 已注册（PR-C/E）；41 随 PR-G（音源注册表）注册。
+- [x] 错误码 40–45 全部注册：40/44（清单）、41（音源）、42/43（渲染）、45（通道）。
 - [~] 文档：`docs/compose.md` + `docs/structure.md` + README 已更新；CHANGELOG 2.0.0 待 PR-H。
 - [x] CI 绿；新增模块覆盖率 ≥90%（compose 99.5% / midi 96% / render 93%），根套件 91.01%。

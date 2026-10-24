@@ -1,7 +1,7 @@
 # compose：代码驱动的多轨编曲（2.0）
 
-> 状态：**2.0 PR-F 已交付**（清单 + DSL + Arranger + 分轨渲染/混音 + 总谱/分谱）。
-> 命令面：`compose init / validate / build / render / score`。音源注册表在 PR-G 接入。
+> 状态：**2.0 PR-G 已交付**（清单 + DSL + Arranger + 分轨渲染/混音 + 总谱/分谱 + 音源注册表）。
+> 命令面：`compose init / validate / build / render / score` + `soundbank list / info / verify`。
 
 `compose` 是"数字轴"入口：一份 `song.toml`（或 Python DSL）完整描述一首曲子，
 构建出**全保真 MIDI**（format 1，含速度表/拍号/调性/CC/音色库）与**编排快照**，
@@ -221,7 +221,24 @@ sunoaux compose score night/song.toml -o out/night/score         --format svg,pn
 > 大谱表（钢琴两行谱）与分页尚在 PR-F 之后单开。另：符干长度偏长的视觉问题
 > 属 1.7.0 起的既有渲染行为（旧管线同样存在），不在本 PR 改动范围内。
 
-## 8. 与旧命令的关系
+## 8. 音源库（PR-G）
+
+```bash
+sunoaux soundbank list                 # 列出 module/ 下发现的音源（含结构校验）
+sunoaux soundbank info generaluser-gs  # 详情：路径/格式/体积/许可/校验
+sunoaux soundbank verify --all         # 批量结构校验；有失败则退出码 41
+```
+
+- **只登记，不分发**：扫描 `module/` 下的 `.sf2`（未来 `.sf3`/`.sfz`），只描述你机器上已有的文件；
+  `license` 字段对常见免费库给出提示，**不代替原许可证**（请自行确认商业使用条件）。
+- **结构校验**（不启动 fluidsynth）：存在性 + 体积下限（≥64KB）+ `RIFF/sfbk` 魔数；
+  `.sfz` 检查是否有 `<region>/<group>`。真正的"能不能发声"由渲染阶段暴露（错误码 4/7）。
+- **id 规则**：文件名 slug 化（`GeneralUser-GS` → `generaluser-gs`）；
+  同名不同文件时自动追加父目录名（`gm-x` / `gm-y`），保证扫描结果确定。
+- `doctor` 新增"音源库"一行：`✅ 2/2 套可用（colombogmgs2, generaluser-gs）`。
+- 错误码 **41**：未注册 id、文件缺失、体积异常、非 RIFF/sfbk 容器。
+
+## 9. 与旧命令的关系
 
 | 场景 | 用哪个 |
 |---|---|
@@ -231,7 +248,7 @@ sunoaux compose score night/song.toml -o out/night/score         --format svg,pn
 
 旧命令在 2.0 全周期保留；`compose` 不改变它们的行为。
 
-## 9. 后续（按 PR 推进）
+## 10. 后续（按 PR 推进）
 
 | PR | 内容 | 用户可见变化 |
 |---|---|---|
@@ -239,4 +256,4 @@ sunoaux compose score night/song.toml -o out/night/score         --format svg,pn
 | ~~E~~ | ~~渲染 v2（后端协议 / 分轨 / 混音）~~ | 已交付：`compose render` → mix + stems/ + midi/ |
 | ~~F~~ | ~~总谱 v2（移调 / 分谱组 / 分谱）~~ | 已交付：`compose score` → 总谱 + 分谱 |
 | F+ | 大谱表（钢琴两行）、分页、演奏记号 | 更接近出版级总谱 |
-| G | SoundBank 注册表 | `soundbank list/info/verify`，每轨独立选库 |
+| ~~G~~ | ~~SoundBank 注册表 + doctor~~ | 已交付：`soundbank list/info/verify`；**每轨独立选库**待 2.1 |

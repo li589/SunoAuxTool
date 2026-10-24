@@ -19,6 +19,7 @@ SunoAuxTool/
 │   ├── models/                 # 数据模型
 │   ├── music_theory/           # 乐理（和弦 / 调式 / 对位）
 │   ├── render/                 # 渲染：fluidsynth 旧类 + backend 协议(2.0 PR-E) + mixer 分轨混音
+│   ├── soundbank/              # 音源库注册表（2.0 PR-G）：发现/查询/结构校验（错误码 41）
 │   ├── score/                  # 谱面子系统（theory→model→layout→drawing→svg/jianpu/png/musicxml）
 │   ├── styles/                 # 风格标签
 │   ├── video/                  # 音乐视频（原 videomaker）
@@ -33,6 +34,7 @@ SunoAuxTool/
 │   ├── midi/                   #   2.0 PR-A MIDI 交换层（SMF 读写 / 通道 / golden）
 │   ├── pre/                    #   创作域（generators / theory / render / inspire）
 │   ├── score/                  #   谱面 + 导出 CLI
+│   ├── soundbank/              #   2.0 PR-G 音源库（registry / cli）
 │   ├── video/                  #   视频域
 │   ├── conftest.py             #   根夹具（全树生效）
 │   └── test_version_alignment.py  #   发布守卫（版本/CHANGELOG 对齐，刻意置根）

@@ -44,6 +44,7 @@ from sunoauxtool.commands.helpers import (
     set_debug,
 )
 from sunoauxtool.compose.cli import app as compose_app
+from sunoauxtool.soundbank.cli import app as soundbank_app
 from sunoauxtool.config import Config
 from sunoauxtool.env import PathResolver
 from sunoauxtool.exceptions import (
@@ -82,6 +83,7 @@ app.add_typer(config_app, name="config")
 app.add_typer(ai_app, name="ai")
 app.add_typer(inspire_app, name="inspire")
 app.add_typer(compose_app, name="compose")
+app.add_typer(soundbank_app, name="soundbank")
 
 
 # ---------------------------------------------------------------------------
@@ -768,6 +770,24 @@ def doctor_cmd(
             _doctor_item(probe.component, f"⚠️ BROKEN ({probe.path})")
             typer.echo(f"     → {probe.detail}")
             warnings += 1
+
+    # 音源库注册表（2.0 PR-G）：只登记与结构校验，不下载
+    try:
+        from sunoauxtool.soundbank import build_registry
+
+        banks = build_registry().list()
+        healthy = [bank.id for bank in banks if bank.verify().ok]
+        if healthy:
+            _doctor_item("音源库", f"✅ {len(healthy)}/{len(banks)} 套可用（{', '.join(healthy)}）")
+        elif banks:
+            _doctor_item("音源库", f"⚠️ {len(banks)} 套登记但均校验失败")
+            warnings += 1
+        else:
+            _doctor_item("音源库", "⚠️ 未发现音源（module/ 下无 .sf2）")
+            warnings += 1
+    except Exception as exc:  # pragma: no cover - 扫描失败不该中断诊断
+        _doctor_item("音源库", f"⚠️ 扫描失败: {exc}")
+        warnings += 1
 
     # ffmpeg / ffprobe（1.4.7 F1：video / dsp concat / preview 全依赖；
     # 复用 download 包三层定位：SUNO_FFMPEG / SUNO_FFMPEG_DIRS / PATH / 已知目录）

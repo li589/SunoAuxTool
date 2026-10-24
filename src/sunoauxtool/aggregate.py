@@ -15,6 +15,7 @@
     sunoaux post suno-dl    （R8 已交付：Suno 官方明文下载三段式）
     sunoaux post strip-meta （R9 已交付：移除 Suno 痕迹——标签清除/保留/覆写 + MOTW）
     sunoaux compose init / validate / build / render / score  （2.0 PR-C..F：编曲 → MIDI/音频/总谱）
+    sunoaux soundbank list / info / verify  （2.0 PR-G：音源库登记与校验）
 
 映射表（新 -> 旧）：
     pre  melody      -> sunoauxtool generate melody
@@ -41,6 +42,7 @@ from sunoauxtool.ai.audiosr import AudioSRAdapter
 from sunoauxtool.commands.helpers import _guard
 from sunoauxtool.compose import cli as compose_cli
 from sunoauxtool.download import cli as download_cli
+from sunoauxtool.soundbank import cli as soundbank_cli
 from sunoauxtool.exceptions import InputFileError, ParameterError
 from sunoauxtool.video import cli as video_cli
 
@@ -477,3 +479,23 @@ compose_app.command("score", help="(= sunoauxtool compose score) 导出总谱/�
 )
 
 app.add_typer(compose_app, name="compose")
+
+# ---------------------------------------------------------------------------
+# soundbank：音源库注册表（2.0 PR-G，映射 sunoauxtool soundbank）
+# ---------------------------------------------------------------------------
+
+soundbank_app = typer.Typer(
+    help="音源库：列出 / 查看 / 校验 SF2（只登记不下载）",
+    no_args_is_help=True,
+)
+soundbank_app.command("list", help="(= sunoauxtool soundbank list) 列出已发现音源")(
+    soundbank_cli.list_banks
+)
+soundbank_app.command("info", help="(= sunoauxtool soundbank info) 音源详情")(
+    soundbank_cli.info
+)
+soundbank_app.command("verify", help="(= sunoauxtool soundbank verify) 结构校验")(
+    soundbank_cli.verify
+)
+
+app.add_typer(soundbank_app, name="soundbank")

@@ -19,7 +19,7 @@
     30-34 sunoauxtool.download.suno_dl（Suno 官方下载三段式）
     35-36 sunoauxtool.meta（元数据清除/保留/覆写）
     40 sunoauxtool.compose（清单语义/编曲非法）
-    41 音源缺失或校验失败（预留 2.1）
+    41 音源缺失或校验失败（2.0 PR-G 音源注册表）
     42 渲染后端不可用（2.0 PR-E）
     43 分轨渲染或混音失败（2.0 PR-E）
     44 sunoauxtool.compose（清单结构/schema 非法）
@@ -78,7 +78,9 @@ ERROR_CODES: List[Tuple[int, str, str]] = [
     # ---- sunoauxtool.compose 段（40 / 44，2.0 PR-C）----
     (40, "编曲清单非法", "compose：语义错误（小节数/段落衔接/音域/通道/音符越界），带 JSON Pointer"),
     (44, "清单 schema 校验失败", "compose：结构错误（缺字段/类型不符/未知字段/TOML 语法）"),
-    # ---- 渲染段（42/43，2.0 PR-E；41 留给 2.1 音源注册表）----
+    # ---- 音源段（41，2.0 PR-G）----
+    (41, "音源缺失或校验失败", "soundbank：未注册的音源 id、文件缺失、体积异常、非 RIFF/sfbk 容器"),
+    # ---- 渲染段（42/43，2.0 PR-E）----
     (42, "渲染后端不可用", "render：fluidsynth 缺失/不可执行、后端自检失败"),
     (43, "分轨或混音失败", "render：stem 渲染失败、采样率/长度不一致、混音输出不可写"),
 ]
