@@ -5,8 +5,9 @@
 1. **LLM 只负责"写清单"，不负责"写音乐"**。产出物是 ``song.toml`` 文本，
    正确性由既有的 :class:`~sunoauxtool.compose.spec.SongSpec` 校验
    （错误码 40/44 + JSON Pointer）裁决——模型说什么不算，校验通过才算。
-2. **修复闭环是确定性的**。每一轮把上一稿 + 结构化错误列表喂回去，
-   最多 ``max_rounds`` 轮；耗尽仍非法 → 错误码 46（附最后一轮全部错误）。
+2. **修复闭环是确定性的**。每一轮把上一稿 + 全部结构化错误喂回去
+   （2.4 起错误并行收集，不再"修一个、撞下一个"），最多 ``max_rounds`` 轮；
+   耗尽仍非法 → 错误码 46（附最后一轮全部错误）。
    这与 Arranger 的"确定性种子"是同一种承诺：同样的对话历史产出同样的清单，
    可审计、可重放（temperature 固定 0）。
 3. **零新依赖**。OpenAI 兼容 ``/chat/completions`` 用 stdlib ``urllib``（函数体内
@@ -27,7 +28,7 @@ import tomllib
 from dataclasses import dataclass, field
 from typing import Protocol
 
-from sunoauxtool.compose.spec import SongSpec, SpecError
+from sunoauxtool.compose.spec import SCHEMA_ERROR, SongSpec, SpecError, SpecGroupError
 from sunoauxtool.exceptions import SmartNoteGenError
 
 #: compose.ai 段（2.3 M4）
@@ -238,10 +239,37 @@ def extract_toml(text: str) -> str:
 
 def parse_spec(text: str) -> SongSpec:
     """TOML 文本 → 已校验的 :class:`SongSpec`（40/44 错误原样抛出）。"""
-    data = tomllib.loads(text)
-    spec = SongSpec.from_dict(data)
-    spec.validate()
+    spec, errors = spec_errors(text)
+    if errors:
+        raise errors[0]
+    assert spec is not None  # errors 为空时必有 spec
     return spec
+
+
+#: 修复轮提示词里最多列出的错误条数（超出部分汇总成一行，避免 prompt 失控）
+MAX_PROMPT_ERRORS = 12
+
+
+def spec_errors(text: str) -> tuple[SongSpec | None, list[SpecError]]:
+    """TOML 文本 → ``(spec, errors)``；``errors`` 非空表示未通过校验。
+
+    2.4 起错误**并行收集**（``collect_all=True``）：一个坏轨道不再遮住后面的
+    坏段落，修复循环一轮就能看到全部问题。TOML 语法错误仍只有一条
+    （语法坏了就谈不上逐项收集）。
+    """
+    try:
+        data = tomllib.loads(text)
+    except tomllib.TOMLDecodeError as exc:
+        return None, [SpecError("/", f"TOML 语法错误: {exc}", SCHEMA_ERROR)]
+    try:
+        spec = SongSpec.from_dict(data, collect_all=True)
+    except SpecGroupError as exc:
+        return None, list(exc.errors)
+    try:
+        spec.validate(collect_all=True)
+    except SpecGroupError as exc:
+        return None, list(exc.errors)
+    return spec, []
 
 
 # ---------------------------------------------------------------------------
@@ -318,15 +346,15 @@ def generate_spec(
         prompt = build_prompt(brief, draft=draft, errors=errors)
         text = client.complete(SYSTEM_PROMPT, prompt)
         toml_text = extract_toml(text)
-        try:
-            spec = parse_spec(toml_text)
-        except SpecError as exc:
-            message = str(exc)
-            errors = [message]
-            # 同轮可能带多条（schema 段逐字段报错时 from_dict 只抛第一条，
-            # 修复循环会逐轮收敛——这正是闭环的意义）
+        spec, found = spec_errors(toml_text)
+        if found:
+            # 错误并行收集：一轮把全部问题喂回去，不再"修一个、撞下一个"
+            errors = [str(item) for item in found[:MAX_PROMPT_ERRORS]]
+            if len(found) > MAX_PROMPT_ERRORS:
+                errors.append(f"…另有 {len(found) - MAX_PROMPT_ERRORS} 处错误未列出")
             rounds.append(RoundReport(
-                index=index, prompt=prompt, toml_text=toml_text, errors=errors,
+                index=index, prompt=prompt, toml_text=toml_text,
+                errors=[str(item) for item in found],
             ))
             draft = toml_text
             continue
@@ -338,9 +366,11 @@ def generate_spec(
             provider=client.name, model=client.model, rounds=rounds,
         )
     last = rounds[-1].errors if rounds else []
+    shown = last[:MAX_PROMPT_ERRORS]
+    suffix = f"（另有 {len(last) - MAX_PROMPT_ERRORS} 处未列出）" if len(last) > MAX_PROMPT_ERRORS else ""
     raise AIError(
-        f"AI 编曲在 {max_rounds} 轮内未产出合法清单；最后一轮错误："
-        + "；".join(last),
+        f"AI 编曲在 {max_rounds} 轮内未产出合法清单；最后一轮 {len(last)} 处错误："
+        + "；".join(shown) + suffix,
         kind="rounds_exhausted", detail="\n".join(last),
     )
 

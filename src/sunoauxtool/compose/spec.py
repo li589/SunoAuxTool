@@ -93,6 +93,26 @@ class SpecError(ParameterError):
         return {"path": self.path or "/", "code": self.code, "message": self.detail}
 
 
+class SpecGroupError(SpecError):
+    """一次收集到的**多条**清单错误（``collect_all=True`` 时抛出）。
+
+    ``path`` / ``code`` 取第一条错误的（保持"首错优先"的定位习惯），
+    完整列表在 :attr:`errors`；``message`` 把全部错误串在一起，
+    因此 ``str(exc)`` 永远包含第一条——既有断言写法不受影响。
+    """
+
+    def __init__(self, errors: Sequence["SpecError"]) -> None:
+        if not errors:  # pragma: no cover - 调用方保证非空
+            raise ValueError("SpecGroupError 需要至少一条错误")
+        first = errors[0]
+        super().__init__(
+            first.path,
+            f"共 {len(errors)} 处错误: " + "；".join(str(item) for item in errors),
+            first.code,
+        )
+        self.errors: list[SpecError] = list(errors)
+
+
 # ---------------------------------------------------------------------------
 # 类型读取（所有错误带路径）
 # ---------------------------------------------------------------------------
@@ -342,8 +362,15 @@ class SongSpec:
         return cls.from_dict(data)
 
     @classmethod
-    def from_dict(cls, data: dict) -> "SongSpec":
-        """从已解析字典构建（TOML/JSON/DSL 共用同一路径）。"""
+    def from_dict(cls, data: dict, *, collect_all: bool = False) -> "SongSpec":
+        """从已解析字典构建（TOML/JSON/DSL 共用同一路径）。
+
+        Args:
+            data: 已解析的清单字典。
+            collect_all: True 时逐**条目**收集全部结构错误并抛
+                :class:`SpecGroupError`（AI 修复循环用——一轮看到所有问题）；
+                False（默认）保持原行为：抛第一条错误。
+        """
         data = _cast(data, "dict", "")
         _only(data, ("schema", "song", "tempo", "section", "track"), "")
 
@@ -366,35 +393,61 @@ class SongSpec:
             bars=_opt(song, "bars", "int", None, "/song"),
         )
 
+        # 逐条目收集：一个坏段落/坏轨道不再遮住后面的错误（条目解析均为纯函数）
+        problems: list[SpecError] = []
         for index, item in enumerate(_tables(data, "tempo", "")):
             path = f"/tempo/{index}"
-            _only(item, ("beat", "bpm", "curve"), path)
-            spec.tempo_map.append((
-                _req(item, "beat", "float", path),
-                _req(item, "bpm", "float", path),
-                _opt(item, "curve", "str", "step", path),
-            ))
+            try:
+                _only(item, ("beat", "bpm", "curve"), path)
+                spec.tempo_map.append((
+                    _req(item, "beat", "float", path),
+                    _req(item, "bpm", "float", path),
+                    _opt(item, "curve", "str", "step", path),
+                ))
+            except SpecError as exc:
+                problems.append(exc)
 
         for index, item in enumerate(_tables(data, "section", "")):
-            spec.sections.append(_section_from(item, f"/section/{index}"))
+            try:
+                spec.sections.append(_section_from(item, f"/section/{index}"))
+            except SpecError as exc:
+                problems.append(exc)
 
         for index, item in enumerate(_tables(data, "track", "")):
-            spec.tracks.append(_track_from(item, f"/track/{index}"))
+            try:
+                spec.tracks.append(_track_from(item, f"/track/{index}"))
+            except SpecError as exc:
+                problems.append(exc)
+
+        if problems:
+            raise SpecGroupError(problems) if collect_all else problems[0]
         return spec
 
     # -- 语义校验 ---------------------------------------------------------
 
-    def validate(self) -> None:
-        """语义校验（错误码 40）；不修改任何状态。"""
+    def validate(self, *, collect_all: bool = False) -> None:
+        """语义校验（错误码 40）；不修改任何状态。
+
+        Args:
+            collect_all: True 时逐**条目**收集全部语义错误并抛
+                :class:`SpecGroupError`；False（默认）抛第一条错误。
+        """
+        # 硬前置：没有段落/轨道时后续逐项检查没有意义，保持首错即停
         if not self.sections:
             raise SpecError("/section", "至少需要一个段落", ARRANGEMENT_ERROR)
         if not self.tracks:
             raise SpecError("/track", "至少需要一条轨道", ARRANGEMENT_ERROR)
 
-        self._validate_song_table()
-        self._validate_tempo_map()
-        section_ids = self._validate_sections()
-        self._validate_tracks(section_ids)
+        problems: list[SpecError] = []
+        try:
+            self._validate_song_table()
+        except SpecError as exc:
+            problems.append(exc)
+        self._validate_tempo_map(problems)
+        section_ids = self._validate_sections(problems)
+        self._validate_tracks(section_ids, problems)
+        if problems:
+            raise SpecGroupError(problems) if collect_all else problems[0]
 
     def _validate_song_table(self) -> None:
         if not str(self.key).strip():
@@ -415,143 +468,185 @@ class SongSpec:
                 ARRANGEMENT_ERROR,
             )
 
-    def _validate_tempo_map(self) -> None:
+    def _validate_tempo_map(self, problems: list[SpecError] | None = None) -> None:
+        collect = problems is not None
         if not self.tempo_map:
             return  # 只用 [song].tempo 的单一速度
         previous = -1.0
         for index, (beat, bpm, curve) in enumerate(self.tempo_map):
             path = f"/tempo/{index}"
-            if beat < 0:
-                raise SpecError(f"{path}/beat", "beat 不能为负", ARRANGEMENT_ERROR)
-            if beat <= previous:
-                raise SpecError(f"{path}/beat", "beat 必须严格递增", ARRANGEMENT_ERROR)
-            previous = beat
-            if bpm <= 0:
-                raise SpecError(f"{path}/bpm", "bpm 必须 > 0", ARRANGEMENT_ERROR)
-            if curve not in CURVES:
-                raise SpecError(
-                    f"{path}/curve", f"速度曲线只支持 {'/'.join(CURVES)}，实际为 {curve!r}",
-                    ARRANGEMENT_ERROR,
-                )
+            try:
+                if beat < 0:
+                    raise SpecError(f"{path}/beat", "beat 不能为负", ARRANGEMENT_ERROR)
+                if beat <= previous:
+                    raise SpecError(f"{path}/beat", "beat 必须严格递增", ARRANGEMENT_ERROR)
+                previous = beat
+                if bpm <= 0:
+                    raise SpecError(f"{path}/bpm", "bpm 必须 > 0", ARRANGEMENT_ERROR)
+                if curve not in CURVES:
+                    raise SpecError(
+                        f"{path}/curve",
+                        f"速度曲线只支持 {'/'.join(CURVES)}，实际为 {curve!r}",
+                        ARRANGEMENT_ERROR,
+                    )
+            except SpecError as exc:
+                if not collect:
+                    raise
+                problems.append(exc)
         if self.tempo_map[0][0] != 0:
-            raise SpecError("/tempo/0/beat", "速度表首点 beat 必须为 0", ARRANGEMENT_ERROR)
+            problem = SpecError("/tempo/0/beat", "速度表首点 beat 必须为 0", ARRANGEMENT_ERROR)
+            if collect:
+                problems.append(problem)
+            else:
+                raise problem
 
-    def _validate_sections(self) -> list[str]:
+    def _validate_sections(self, problems: list[SpecError] | None = None) -> list[str]:
+        collect = problems is not None
         seen: list[str] = []
         for index, section in enumerate(self.sections):
-            path = f"/section/{index}"
-            if not section.id.strip():
-                raise SpecError(f"{path}/id", "段落 id 不能为空", ARRANGEMENT_ERROR)
-            if section.id in seen:
-                raise SpecError(f"{path}/id", f"段落 id 重复: {section.id!r}", ARRANGEMENT_ERROR)
-            seen.append(section.id)
-            if section.bars < 1:
-                raise SpecError(f"{path}/bars", f"bars 必须 >= 1，实际为 {section.bars}",
-                                ARRANGEMENT_ERROR)
-            if not 0.0 <= section.energy <= 1.0:
-                raise SpecError(f"{path}/energy", f"energy 必须在 0..1，实际为 {section.energy}",
-                                ARRANGEMENT_ERROR)
-            if section.dynamic and section.dynamic not in DYNAMICS:
-                raise SpecError(
-                    f"{path}/dynamic",
-                    f"未知力度记号 {section.dynamic!r}；可用: {', '.join(DYNAMICS)}",
-                    ARRANGEMENT_ERROR,
-                )
-            if section.ramp and section.ramp not in RAMPS:
-                raise SpecError(
-                    f"{path}/ramp",
-                    f"未知渐变 {section.ramp!r}；可用: {', '.join(RAMPS)}",
-                    ARRANGEMENT_ERROR,
-                )
-            if section.tempo is not None and section.tempo <= 0:
-                raise SpecError(f"{path}/tempo", "tempo 必须 > 0", ARRANGEMENT_ERROR)
-            if section.tempo_curve not in CURVES:
-                raise SpecError(
-                    f"{path}/tempo_curve",
-                    f"速度曲线只支持 {'/'.join(CURVES)}，实际为 {section.tempo_curve!r}",
-                    ARRANGEMENT_ERROR,
-                )
-            for chord_index, chord in enumerate(section.progression):
-                if not chord.strip():
-                    raise SpecError(f"{path}/progression/{chord_index}", "和弦不能为空",
-                                    ARRANGEMENT_ERROR)
+            if collect:
                 try:
-                    parse_chord(chord)
-                except ParameterError as exc:
-                    raise SpecError(
-                        f"{path}/progression/{chord_index}", str(exc), ARRANGEMENT_ERROR
-                    ) from exc
+                    self._check_section(section, index, seen)
+                except SpecError as exc:
+                    problems.append(exc)
+            else:
+                self._check_section(section, index, seen)
         return seen
 
-    def _validate_tracks(self, section_ids: Sequence[str]) -> None:
+    def _check_section(self, section: SectionSpec, index: int, seen: list[str]) -> None:
+        """单个段落的语义检查（collect 模式下由外层逐条目捕获）。"""
+        path = f"/section/{index}"
+        if not section.id.strip():
+            raise SpecError(f"{path}/id", "段落 id 不能为空", ARRANGEMENT_ERROR)
+        if section.id in seen:
+            raise SpecError(f"{path}/id", f"段落 id 重复: {section.id!r}", ARRANGEMENT_ERROR)
+        seen.append(section.id)
+        if section.bars < 1:
+            raise SpecError(f"{path}/bars", f"bars 必须 >= 1，实际为 {section.bars}",
+                            ARRANGEMENT_ERROR)
+        if not 0.0 <= section.energy <= 1.0:
+            raise SpecError(f"{path}/energy", f"energy 必须在 0..1，实际为 {section.energy}",
+                            ARRANGEMENT_ERROR)
+        if section.dynamic and section.dynamic not in DYNAMICS:
+            raise SpecError(
+                f"{path}/dynamic",
+                f"未知力度记号 {section.dynamic!r}；可用: {', '.join(DYNAMICS)}",
+                ARRANGEMENT_ERROR,
+            )
+        if section.ramp and section.ramp not in RAMPS:
+            raise SpecError(
+                f"{path}/ramp",
+                f"未知渐变 {section.ramp!r}；可用: {', '.join(RAMPS)}",
+                ARRANGEMENT_ERROR,
+            )
+        if section.tempo is not None and section.tempo <= 0:
+            raise SpecError(f"{path}/tempo", "tempo 必须 > 0", ARRANGEMENT_ERROR)
+        if section.tempo_curve not in CURVES:
+            raise SpecError(
+                f"{path}/tempo_curve",
+                f"速度曲线只支持 {'/'.join(CURVES)}，实际为 {section.tempo_curve!r}",
+                ARRANGEMENT_ERROR,
+            )
+        for chord_index, chord in enumerate(section.progression):
+            if not chord.strip():
+                raise SpecError(f"{path}/progression/{chord_index}", "和弦不能为空",
+                                ARRANGEMENT_ERROR)
+            try:
+                parse_chord(chord)
+            except ParameterError as exc:
+                raise SpecError(
+                    f"{path}/progression/{chord_index}", str(exc), ARRANGEMENT_ERROR
+                ) from exc
+
+    def _validate_tracks(
+        self, section_ids: Sequence[str], problems: list[SpecError] | None = None
+    ) -> None:
+        collect = problems is not None
         ids: set[str] = set()
         channels: dict[int, str] = {}
         drums = 0
         for index, track in enumerate(self.tracks):
-            path = f"/track/{index}"
-            if not track.id.strip():
-                raise SpecError(f"{path}/id", "轨道 id 不能为空", ARRANGEMENT_ERROR)
-            if track.id in ids:
-                raise SpecError(f"{path}/id", f"轨道 id 重复: {track.id!r}", ARRANGEMENT_ERROR)
-            ids.add(track.id)
-            if track.role not in KNOWN_ROLES:
-                raise SpecError(
-                    f"{path}/role",
-                    f"未知角色 {track.role!r}；可用: {', '.join(sorted(KNOWN_ROLES))}",
-                    ARRANGEMENT_ERROR,
-                )
-            if track.program is not None and not 0 <= track.program <= 127:
-                raise SpecError(f"{path}/program", f"program 必须在 0..127，实际为 {track.program}",
-                                ARRANGEMENT_ERROR)
-            if track.channel is not None:
-                if not 0 <= track.channel <= 15:
-                    raise SpecError(f"{path}/channel",
-                                    f"channel 必须在 0..15，实际为 {track.channel}",
-                                    ARRANGEMENT_ERROR)
-                if track.role == "drums" and track.channel != 9:
-                    raise SpecError(f"{path}/channel", "鼓轨必须使用通道 9", ARRANGEMENT_ERROR)
-                if track.role != "drums" and track.channel == 9:
-                    raise SpecError(f"{path}/channel", "通道 9 保留给鼓轨", ARRANGEMENT_ERROR)
-                if track.channel in channels and track.role != "drums":
-                    # 鼓轨之间共用通道 9 是必然的，由下方"最多一条鼓轨"统一报错
-                    raise SpecError(
-                        f"{path}/channel",
-                        f"通道 {track.channel} 已被轨道 {channels[track.channel]!r} 占用",
-                        ARRANGEMENT_ERROR,
-                    )
-                channels[track.channel] = track.id
-            if track.role == "drums":
-                drums += 1
-            if track.articulation and track.articulation not in ARTICULATION_NAMES:
-                raise SpecError(
-                    f"{path}/articulation",
-                    f"未知演奏法 {track.articulation!r}；"
-                    f"可用: {', '.join(sorted(ARTICULATION_NAMES))}",
-                    ARRANGEMENT_ERROR,
-                )
-            if not 0.0 <= track.swing <= 0.75:
-                raise SpecError(f"{path}/swing",
-                                f"swing 必须在 0..0.75，实际为 {track.swing}",
-                                ARRANGEMENT_ERROR)
-            if not -24 <= track.transpose <= 24:
-                raise SpecError(f"{path}/transpose",
-                                f"transpose 必须在 -24..24，实际为 {track.transpose}",
-                                ARRANGEMENT_ERROR)
-            if not 0 <= track.octave <= 9:
-                raise SpecError(f"{path}/octave", f"octave 必须在 0..9，实际为 {track.octave}",
-                                ARRANGEMENT_ERROR)
-            if track.range is not None:
-                low, high = track.range
-                if not 0 <= low <= high <= 127:
-                    raise SpecError(f"{path}/range", f"音域 {track.range} 非法（需 0<=low<=high<=127）",
-                                    ARRANGEMENT_ERROR)
-            for ref_index, ref in enumerate(track.sections):
-                if ref not in section_ids:
-                    raise SpecError(f"{path}/sections/{ref_index}",
-                                    f"引用了不存在的段落 {ref!r}", ARRANGEMENT_ERROR)
-            self._validate_notes(track, path)
+            if collect:
+                try:
+                    drums += self._check_track(track, index, section_ids, ids, channels)
+                except SpecError as exc:
+                    problems.append(exc)
+            else:
+                drums += self._check_track(track, index, section_ids, ids, channels)
         if drums > 1:
             raise SpecError("/track", "一首曲子最多允许一条鼓轨（role='drums'）", ARRANGEMENT_ERROR)
+
+    def _check_track(
+        self,
+        track: TrackSpec,
+        index: int,
+        section_ids: Sequence[str],
+        ids: set[str],
+        channels: dict[int, str],
+    ) -> int:
+        """单条轨道的语义检查；返回 1 表示鼓轨（供外层统计鼓轨数量）。"""
+        path = f"/track/{index}"
+        if not track.id.strip():
+            raise SpecError(f"{path}/id", "轨道 id 不能为空", ARRANGEMENT_ERROR)
+        if track.id in ids:
+            raise SpecError(f"{path}/id", f"轨道 id 重复: {track.id!r}", ARRANGEMENT_ERROR)
+        ids.add(track.id)
+        if track.role not in KNOWN_ROLES:
+            raise SpecError(
+                f"{path}/role",
+                f"未知角色 {track.role!r}；可用: {', '.join(sorted(KNOWN_ROLES))}",
+                ARRANGEMENT_ERROR,
+            )
+        if track.program is not None and not 0 <= track.program <= 127:
+            raise SpecError(f"{path}/program", f"program 必须在 0..127，实际为 {track.program}",
+                            ARRANGEMENT_ERROR)
+        if track.channel is not None:
+            if not 0 <= track.channel <= 15:
+                raise SpecError(f"{path}/channel",
+                                f"channel 必须在 0..15，实际为 {track.channel}",
+                                ARRANGEMENT_ERROR)
+            if track.role == "drums" and track.channel != 9:
+                raise SpecError(f"{path}/channel", "鼓轨必须使用通道 9", ARRANGEMENT_ERROR)
+            if track.role != "drums" and track.channel == 9:
+                raise SpecError(f"{path}/channel", "通道 9 保留给鼓轨", ARRANGEMENT_ERROR)
+            if track.channel in channels and track.role != "drums":
+                # 鼓轨之间共用通道 9 是必然的，由上方"最多一条鼓轨"统一报错
+                raise SpecError(
+                    f"{path}/channel",
+                    f"通道 {track.channel} 已被轨道 {channels[track.channel]!r} 占用",
+                    ARRANGEMENT_ERROR,
+                )
+            channels[track.channel] = track.id
+        drums = 1 if track.role == "drums" else 0
+        if track.articulation and track.articulation not in ARTICULATION_NAMES:
+            raise SpecError(
+                f"{path}/articulation",
+                f"未知演奏法 {track.articulation!r}；"
+                f"可用: {', '.join(sorted(ARTICULATION_NAMES))}",
+                ARRANGEMENT_ERROR,
+            )
+        if not 0.0 <= track.swing <= 0.75:
+            raise SpecError(f"{path}/swing",
+                            f"swing 必须在 0..0.75，实际为 {track.swing}",
+                            ARRANGEMENT_ERROR)
+        if not -24 <= track.transpose <= 24:
+            raise SpecError(f"{path}/transpose",
+                            f"transpose 必须在 -24..24，实际为 {track.transpose}",
+                            ARRANGEMENT_ERROR)
+        if not 0 <= track.octave <= 9:
+            raise SpecError(f"{path}/octave", f"octave 必须在 0..9，实际为 {track.octave}",
+                            ARRANGEMENT_ERROR)
+        if track.range is not None:
+            low, high = track.range
+            if not 0 <= low <= high <= 127:
+                raise SpecError(f"{path}/range", f"音域 {track.range} 非法（需 0<=low<=high<=127）",
+                                ARRANGEMENT_ERROR)
+        for ref_index, ref in enumerate(track.sections):
+            if ref not in section_ids:
+                raise SpecError(f"{path}/sections/{ref_index}",
+                                f"引用了不存在的段落 {ref!r}", ARRANGEMENT_ERROR)
+        self._validate_notes(track, path)
+        return drums
 
     def _validate_notes(self, track: TrackSpec, path: str) -> None:
         spans = self._section_spans()

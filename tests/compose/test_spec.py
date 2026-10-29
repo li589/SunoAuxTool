@@ -12,6 +12,7 @@ from sunoauxtool.compose.spec import (
     SCHEMA_VERSION,
     SongSpec,
     SpecError,
+    SpecGroupError,
     split_progression,
 )
 from sunoauxtool.exceptions import ParameterError
@@ -624,3 +625,81 @@ class TestChordValidation:
         data = _spec_dict()
         data["section"][0]["progression"] = ["Dm7", "Bbmaj7", "F/A", "Dsus4"]
         _parse_and_validate(data)
+
+
+def _structurally_bad_dict() -> dict:
+    """三处**结构**错误分散在不同条目（from_dict 阶段即可收集）。"""
+    return {
+        "schema": 1,
+        "song": {"title": "multi", "key": "C major", "tempo": 96, "seed": 7},
+        "section": [
+            {"id": "verse", "bars": 2, "tmpo": 3, "progression": ["Dm"]},
+            {"id": "chorus", "bars": 2, "progression": ["Bb"]},
+        ],
+        "track": [
+            {"id": "piano", "role": "harmony", "ghost": 1},
+            {"id": "bass", "role": "bass", "range": [1]},
+        ],
+    }
+
+
+def _semantically_bad_dict() -> dict:
+    """四处**语义**错误分散在不同条目（validate 阶段收集）。"""
+    return {
+        "schema": 1,
+        "song": {"title": "multi", "key": "C major", "tempo": 96, "seed": 7,
+                 "swing": 0.9},
+        "section": [
+            {"id": "verse", "bars": 2, "energy": 1.7, "progression": ["Dm", "Bb"]},
+            {"id": "chorus", "bars": 2, "energy": 0.9, "progression": ["Bb", "C"]},
+        ],
+        "track": [
+            {"id": "piano", "role": "harmony", "program": 0,
+             "articulation": "flautando"},
+            {"id": "bass", "role": "bass", "program": 33, "sections": ["intro"]},
+        ],
+    }
+
+
+class TestCollectAll:
+    """2.4 错误并行收集：一个坏条目不再遮住后面的坏条目。"""
+
+    def test_from_dict_collects_all(self) -> None:
+        with pytest.raises(SpecGroupError) as excinfo:
+            SongSpec.from_dict(_structurally_bad_dict(), collect_all=True)
+        assert [item.path for item in excinfo.value.errors] == [
+            "/section/0", "/track/0", "/track/1/range",
+        ]
+
+    def test_group_error_is_spec_error_with_first_path(self) -> None:
+        with pytest.raises(SpecGroupError) as excinfo:
+            SongSpec.from_dict(_structurally_bad_dict(), collect_all=True)
+        error = excinfo.value
+        assert isinstance(error, SpecError)
+        assert error.path == "/section/0"          # 首错优先定位
+        assert str(error.errors[0]) in str(error)  # str 永远包含第一条
+
+    def test_default_still_first_error_only(self) -> None:
+        with pytest.raises(SpecError) as excinfo:
+            SongSpec.from_dict(_structurally_bad_dict())
+        assert not isinstance(excinfo.value, SpecGroupError)
+        assert excinfo.value.path == "/section/0"
+
+    def test_validate_collects_semantic_errors(self) -> None:
+        spec = SongSpec.from_dict(_semantically_bad_dict())
+        with pytest.raises(SpecGroupError) as excinfo:
+            spec.validate(collect_all=True)
+        assert [item.path for item in excinfo.value.errors] == [
+            "/song/swing", "/section/0/energy",
+            "/track/0/articulation", "/track/1/sections/0",
+        ]
+
+    def test_validate_default_unchanged(self) -> None:
+        spec = SongSpec.from_dict(_semantically_bad_dict())
+        with pytest.raises(SpecError) as excinfo:
+            spec.validate()
+        assert excinfo.value.path == "/song/swing"
+
+    def test_clean_spec_passes_collect_all(self) -> None:
+        spec = SongSpec.from_dict(_spec_dict(), collect_all=True)
+        spec.validate(collect_all=True)  # 不抛即通过

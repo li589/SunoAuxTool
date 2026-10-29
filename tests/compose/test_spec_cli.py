@@ -46,6 +46,38 @@ title = "bad"
 tmpo = 96
 """
 
+BAD_MULTI = """\
+schema = 1
+[song]
+title = "multi"
+key = "C major"
+tempo = 96
+
+[[section]]
+id = "verse"
+bars = 2
+energy = 1.7
+progression = ["Dm", "Bb"]
+
+[[section]]
+id = "chorus"
+bars = 2
+energy = 0.9
+progression = ["Bb", "C"]
+
+[[track]]
+id = "piano"
+role = "harmony"
+program = 0
+articulation = "flautando"
+
+[[track]]
+id = "bass"
+role = "bass"
+program = 33
+sections = ["intro"]
+"""
+
 
 def _init(tmp_path: Path, name: str = "night") -> Path:
     result = runner.invoke(app, ["init", name, "-o", str(tmp_path / name)])
@@ -138,22 +170,39 @@ class TestValidate:
         assert "清单不存在" in result.output
 
     def test_semantic_error_code(self, tmp_path: Path) -> None:
+        # 2.4 起 --json 一次报告全部错误（单错误时 count==1）
         path = tmp_path / "bad.toml"
         path.write_text(BAD_SEMANTIC, encoding="utf-8")
         result = runner.invoke(app, ["validate", str(path), "--json"])
         payload = json.loads(result.output)
         assert result.exit_code == 40
-        assert payload == {
-            "ok": False, "path": "/track/0/program",
+        assert payload["ok"] is False
+        assert payload["count"] == 1
+        assert payload["errors"] == [{
+            "path": "/track/0/program",
             "code": 40, "message": "program 必须在 0..127，实际为 200",
-        }
+        }]
+
+    def test_multi_errors_reported_together(self, tmp_path: Path) -> None:
+        # 2.4 错误并行收集：一个坏轨道不再遮住后面的坏段落
+        path = tmp_path / "multi.toml"
+        path.write_text(BAD_MULTI, encoding="utf-8")
+        result = runner.invoke(app, ["validate", str(path), "--json"])
+        payload = json.loads(result.output)
+        assert result.exit_code == 40
+        paths = [item["path"] for item in payload["errors"]]
+        assert payload["count"] == len(payload["errors"]) >= 3
+        assert "/section/0/energy" in paths
+        assert "/track/0/articulation" in paths
+        assert "/track/1/sections/0" in paths
 
     def test_schema_error_code(self, tmp_path: Path) -> None:
         path = tmp_path / "bad.toml"
         path.write_text(BAD_SCHEMA, encoding="utf-8")
         result = runner.invoke(app, ["validate", str(path), "--json"])
         assert result.exit_code == 44
-        assert json.loads(result.output)["message"] == "未知字段: tmpo"
+        payload = json.loads(result.output)
+        assert payload["errors"][0]["message"] == "未知字段: tmpo"
 
     def test_human_error_reports_pointer(self, tmp_path: Path) -> None:
         path = tmp_path / "bad.toml"
@@ -161,7 +210,7 @@ class TestValidate:
         result = runner.invoke(app, ["validate", str(path)])
         assert result.exit_code == 40
         assert "/track/0/program" in result.output
-        assert "错误 [40]" in result.output  # 人读模式：带错误码前缀
+        assert "[40]" in result.output  # 人读模式：每行带错误码
 
 
 class TestBuild:

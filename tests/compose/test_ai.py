@@ -277,3 +277,73 @@ class TestCli:
 def test_error_code_registered() -> None:
     entry = next(item for item in ERROR_CODES if item[0] == AI_ERROR)
     assert "AI 编曲" in entry[1]
+
+
+MULTI_BAD_TOML = """\
+schema = 1
+
+[song]
+title = "多错"
+key = "C major"
+tempo = 96
+seed = 7
+swing = 0.9
+
+[[section]]
+id = "verse"
+bars = 2
+energy = 1.7
+progression = ["Dm", "Bb"]
+
+[[section]]
+id = "chorus"
+bars = 2
+energy = 0.9
+progression = ["Bb", "C"]
+
+[[track]]
+id = "piano"
+role = "harmony"
+program = 0
+articulation = "flautando"
+
+[[track]]
+id = "bass"
+role = "bass"
+program = 33
+sections = ["intro"]
+"""
+
+
+class TestParallelErrors:
+    """2.4 错误并行收集：修复循环一轮看到全部问题，不再"修一个、撞下一个"。"""
+
+    def test_one_round_reports_everything(self) -> None:
+        client = FakeLLMClient([MULTI_BAD_TOML, GOOD_TOML])
+        result = generate_spec("一首曲子", client, max_rounds=3)
+        assert result.attempts == 2
+        first = result.rounds[0]
+        assert len(first.errors) == 4
+        assert any("/song/swing" in text for text in first.errors)
+        assert any("/section/0/energy" in text for text in first.errors)
+        assert any("/track/0/articulation" in text for text in first.errors)
+        assert any("/track/1/sections/0" in text for text in first.errors)
+        assert result.fixed_errors == 4
+
+    def test_repair_prompt_lists_every_error(self) -> None:
+        client = FakeLLMClient([MULTI_BAD_TOML, GOOD_TOML])
+        generate_spec("一首曲子", client, max_rounds=3)
+        second_prompt = client.calls[1][1]
+        assert "/song/swing" in second_prompt
+        assert "/section/0/energy" in second_prompt
+        assert "/track/0/articulation" in second_prompt
+        assert "/track/1/sections/0" in second_prompt
+
+    def test_rounds_exhausted_lists_all_errors(self) -> None:
+        client = FakeLLMClient([MULTI_BAD_TOML] * 5)
+        with pytest.raises(AIError) as excinfo:
+            generate_spec("一首曲子", client, max_rounds=2)
+        assert excinfo.value.kind == "rounds_exhausted"
+        detail = excinfo.value.detail
+        assert "/song/swing" in detail
+        assert "/track/1/sections/0" in detail

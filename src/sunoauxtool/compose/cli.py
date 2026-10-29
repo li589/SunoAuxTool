@@ -36,7 +36,7 @@ from sunoauxtool.compose.score import (
     export_score,
 )
 from sunoauxtool.compose.song import Song
-from sunoauxtool.compose.spec import SpecError, SongSpec
+from sunoauxtool.compose.spec import SpecError, SpecGroupError, SongSpec
 from sunoauxtool.env import PathResolver
 from sunoauxtool.logging_setup import get_logger
 from sunoauxtool.midi.io import write_smf
@@ -241,22 +241,37 @@ def validate_cmd(
     path: Path = typer.Argument(..., help="song.toml 路径"),
     as_json: bool = typer.Option(False, "--json", help="以 JSON 输出结果（AI/CI 友好）"),
 ) -> None:
-    """校验清单的语法、结构与语义。"""
+    """校验清单的语法、结构与语义（2.4 起一次报告全部错误）。"""
     if not path.exists():
         typer.echo(f"清单不存在: {path}", err=True)
         raise typer.Exit(1)
     if as_json:
         try:
             spec = SongSpec.from_toml(path)
-            spec.validate()
-        except SpecError as exc:
-            typer.echo(json.dumps({"ok": False, **exc.to_dict()}, ensure_ascii=False))
+            spec.validate(collect_all=True)
+        except SpecGroupError as exc:
+            typer.echo(json.dumps({
+                "ok": False,
+                "count": len(exc.errors),
+                "errors": [item.to_dict() for item in exc.errors],
+            }, ensure_ascii=False))
+            raise typer.Exit(exc.code) from exc
+        except SpecError as exc:  # 结构阶段首错（如 /song 未知字段）——单条输出
+            typer.echo(json.dumps({
+                "ok": False, "count": 1, "errors": [exc.to_dict()],
+            }, ensure_ascii=False))
             raise typer.Exit(exc.code) from exc
         typer.echo(json.dumps({"ok": True, "summary": spec.summary()}, ensure_ascii=False))
         return
 
-    spec = SongSpec.from_toml(path)
-    spec.validate()
+    try:
+        spec = SongSpec.from_toml(path)
+        spec.validate(collect_all=True)
+    except SpecGroupError as exc:
+        typer.echo(f"校验失败（{len(exc.errors)} 处错误）: {path}", err=True)
+        for item in exc.errors:
+            typer.echo(f"  [{item.code}] {item}", err=True)
+        raise typer.Exit(exc.code) from exc
     typer.echo(f"校验通过: {path}")
     for line in _describe(spec):
         typer.echo(f"  {line}")

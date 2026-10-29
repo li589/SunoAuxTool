@@ -2,6 +2,28 @@
 
 本项目遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.0.0/) 风格。
 
+## [2.4.0] - 2026-10-29（M4 补强：错误并行收集——修复循环一轮看到全部问题）
+
+**主题**：拆掉 M4 的已知短板。此前 `SongSpec.from_dict` 每轮只报第一条错误，
+AI 修复循环会"修一个、撞下一个"，复杂清单可能吃满轮数；现在错误**逐条目并行收集**。
+
+### 新增
+- `SpecGroupError`（`SpecError` 子类）：一次携带多条清单错误；`path`/`code` 取首条
+  （保持首错优先定位），`str()` 永远包含第一条——既有断言写法不受影响。
+- `SongSpec.from_dict(..., collect_all=True)` 与 `SongSpec.validate(..., collect_all=True)`：
+  逐**条目**（每个段落/轨道/音符/tempo 点）独立收集，条目内部仍报首错。
+  默认行为完全不变（抛第一条）——既有调用方零感知。
+- `compose validate`（2.4）：一次报告全部错误。`--json` 输出改为
+  `{"ok": false, "count": N, "errors": [{path, code, message}, ...]}`；
+  人读模式逐行 `[码] 路径: 消息`。
+- `compose ai` 修复循环接入：每轮把全部错误喂回模型（单轮最多列 12 条，
+  超出汇总成一行）；`rounds[i].errors` 存全量；轮次耗尽的 46 错误 detail 带全量。
+
+### 数字
+- 全树 2355 例、覆盖率 91.29%；新增 TestCollectAll（6 例）、TestParallelErrors（3 例）、
+  validate 多错误 CLI 用例。
+
+
 ## [2.3.1] - 2026-10-24（修复：高音谱号按范例重画——主轴过圈心、上弧无折点）
 
 ### 修复
