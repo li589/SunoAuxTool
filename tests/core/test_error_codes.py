@@ -54,12 +54,13 @@ def test_error_codes_table_complete():
     2.0 PR-E：登记渲染段 42（后端不可用）/43（分轨或混音失败）。
     2.0 PR-G：登记音源段 41（音源缺失或校验失败）。
     2.3 M4：登记 compose.ai 段 46（AI 编曲生成失败）。
+    2.5：登记 relay-music 段 47（媒体生成任务失败/超时）。
     """
     codes = [c for c, _n, _d in ERROR_CODES]
     assert codes[:10] == list(range(10))
     assert set(codes) == set(range(10)) | set(range(10, 15)) | {15, 16} | set(
         range(20, 25)
-    ) | {25, 26} | set(range(27, 37)) | {40, 41, 42, 43, 44, 45, 46}
+    ) | {25, 26} | set(range(27, 37)) | {40, 41, 42, 43, 44, 45, 46, 47}
 
 
 def test_error_codes_video_and_download_segments():

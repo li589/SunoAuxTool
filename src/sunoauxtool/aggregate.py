@@ -14,6 +14,8 @@
     sunoaux post enhance    （AudioSR 音质提升，R5；依赖可选装）
     sunoaux post suno-dl    （R8 已交付：Suno 官方明文下载三段式）
     sunoaux post strip-meta （R9 已交付：移除 Suno 痕迹——标签清除/保留/覆写 + MOTW）
+    sunoaux post relay-music （2.5 已交付：中转站 Suno 生成，≈0.5 元/条）
+    sunoaux post suno-web    （2.5 已交付：Web 凭证只读——Cookie 校验/曲目列表/下载）
     sunoaux compose init / validate / build / render / score  （2.0 PR-C..F：编曲 → MIDI/音频/总谱）
     sunoaux soundbank list / info / verify  （2.0 PR-G：音源库登记与校验）
 
@@ -116,14 +118,15 @@ post_app.command("unlock", help="(= downloadhelper unlock) 通用解密：ncm/kw
 )
 @post_app.command(
     "fetch",
-    help="取回音频（R7）：catcatch=猫抓缓存扫描转码（默认）；suno-api/haimeng/tianyin=API 源；"
-         "usesuno=usesuno.com 转播源（SW-Mango 密文，需自备人验 token）",
+    help="取回音频（R7；2.5 增两源）：catcatch=猫抓缓存；suno-api/haimeng/tianyin=API 源；"
+         "usesuno=转播源；relay-music=中转站生成（query 即 prompt，≈0.5 元/条）；"
+         "suno-web=Web 凭证只读下载（query 为 clip_id）",
 )
 @_guard
 def fetch_cmd(
     query: str = typer.Argument(..., help="catcatch=缓存目录；API 源=歌曲/任务 ID；usesuno=clip_id 或 /song/<uuid> 链接"),
     source: str = typer.Option(
-        "catcatch", "--source", "-s", help="源：catcatch | suno-api | haimeng | tianyin | usesuno"
+        "catcatch", "--source", "-s", help="源：catcatch | suno-api | haimeng | tianyin | usesuno | relay-music（生成） | suno-web（Web 凭证只读）"
     ),
     out: Path = typer.Option(None, "-o", "--out", help="输出目录（catcatch 默认原目录；API 默认 ./fetched/<source>）"),
     fmt: str = typer.Option("both", "--fmt", help="[catcatch] 输出格式: opus | mp3 | both"),
@@ -499,3 +502,127 @@ soundbank_app.command("verify", help="(= sunoauxtool soundbank verify) 结构校
 )
 
 app.add_typer(soundbank_app, name="soundbank")
+
+
+# ---------------------------------------------------------------------------
+# Suno 访问双通道（2.5）：通道 A 中转站生成 / 通道 B Web 凭证只读
+# 设计：docs/plan-suno-access-channels.md
+# ---------------------------------------------------------------------------
+
+
+@post_app.command(
+    "relay-music",
+    help="通道 A（中转站）：一句话描述 → Suno 生成 → 轮询 → 下载明文 mp3（≈0.5 元/条）",
+)
+@_guard
+def relay_music_cmd(
+    prompt: str = typer.Argument(None, help="生成描述（曲风/情绪/结构/时长；--task 时可省略）"),
+    out: Path = typer.Option(None, "-o", "--out", help="输出目录（默认 output/relay-music/）"),
+    model: Optional[str] = typer.Option(
+        None, "--model", help="生成模型（默认 SUNOAUX_RELAY_MUSIC_MODEL，缺省 music）"
+    ),
+    api_key: Optional[str] = typer.Option(
+        None, "--api-key", help="中转站 key（默认 SUNOAUX_RELAY_API_KEY，回落 SUNOAUX_AI_API_KEY）"
+    ),
+    base_url: Optional[str] = typer.Option(
+        None, "--base-url", help="中转站端点（默认 SUNOAUX_RELAY_BASE_URL）"
+    ),
+    params: Optional[str] = typer.Option(
+        None, "--params", help="模型专属参数（JSON 对象，如 '{\"instrumental\": true}'）"
+    ),
+    task: Optional[str] = typer.Option(
+        None, "--task", help="只查已有任务：给定 task_id，轮询到终态并下载（不重新生成）"
+    ),
+    wait_timeout: float = typer.Option(600.0, "--wait-timeout", help="轮询超时（秒）"),
+    dry_run: bool = typer.Option(False, "--dry-run", help="只自检凭证与参数，不发请求"),
+) -> None:
+    """中转站音乐生成（任务式）：错误码 25 凭证缺失 / 26 请求失败 / 47 任务失败超时。"""
+    import json as _json
+
+    from sunoauxtool.download.sources.relay_music import RelayMusicSource
+
+    extra = {}
+    if params:
+        try:
+            extra = _json.loads(params)
+        except _json.JSONDecodeError as exc:
+            raise ParameterError(f"--params 不是合法 JSON: {exc}") from exc
+        if not isinstance(extra, dict):
+            raise ParameterError("--params 必须是 JSON 对象")
+    source = RelayMusicSource(api_key=api_key, base_url=base_url, model=model)
+    if dry_run:
+        typer.echo(f"🔎 dry-run（不生成）: {source.check(prompt or '')}")
+        return
+    if task:
+        task_id = task
+    else:
+        if not str(prompt or "").strip():
+            raise ParameterError("生成描述不能为空（或用 --task 查询已有任务）")
+        task_id = source.submit(prompt, params=extra or None)
+        typer.echo(f"🎵 任务已提交: {task_id}（model={source.model}）")
+    urls = source.wait_task(task_id, timeout_s=wait_timeout)
+    out_dir = out or Path("output") / "relay-music"
+    files = []
+    for index, url in enumerate(urls, start=1):
+        dest = out_dir / f"{task_id}-v{index}.mp3"
+        source.download(url, dest)
+        files.append(dest)
+        typer.echo(f"  ✅ {dest}")
+    typer.echo(f"完成：{len(files)} 个文件 → {out_dir}")
+
+
+suno_web_app = typer.Typer(
+    help="通道 B（Suno Web 凭证，P1 只读）：Cookie 访问 feed/clip 并下载",
+    no_args_is_help=True,
+)
+
+
+@suno_web_app.command("login", help="校验 Cookie 是否有效（调一次只读接口，不落盘）")
+@_guard
+def suno_web_login(
+    cookie: Optional[str] = typer.Option(
+        None, "--cookie", help="整串 Cookie（默认读 SUNOAUX_SUNO_COOKIE 或配置节）"
+    ),
+) -> None:
+    """校验 Cookie：列表能拉到内容即视为有效；输出脱敏。"""
+    from sunoauxtool.download.sources.suno_web import SunoWebSource
+
+    source = SunoWebSource(cookie=cookie)
+    clips = source.list_clips(limit=5)
+    typer.echo(f"✅ Cookie 有效（最近曲目 {len(clips)} 条）")
+    for item in clips:
+        typer.echo(f"   {item['id']}  {item['title']}  ({len(item['urls'])} 个音频)")
+
+
+@suno_web_app.command("list", help="列出我的曲目（feed，最新在前）")
+@_guard
+def suno_web_list(
+    limit: int = typer.Option(20, "--limit", help="条数上限"),
+    cookie: Optional[str] = typer.Option(None, "--cookie", help="整串 Cookie"),
+) -> None:
+    """只读列出曲目；下载单个曲目用 `post fetch -s suno-web <clip_id>`。"""
+    from sunoauxtool.download.sources.suno_web import SunoWebSource
+
+    source = SunoWebSource(cookie=cookie)
+    for item in source.list_clips(limit=limit):
+        typer.echo(f"{item['id']}  {item['title']}  ({len(item['urls'])} 个音频)")
+
+
+@suno_web_app.command("fetch", help="按 clip_id（或 /song/<uuid> 链接）下载全部音频版本")
+@_guard
+def suno_web_fetch(
+    clip: str = typer.Argument(..., help="clip_id 或含 UUID 的链接"),
+    out: Path = typer.Option(Path("suno-web"), "-o", "--out", help="输出目录"),
+    cookie: Optional[str] = typer.Option(None, "--cookie", help="整串 Cookie"),
+) -> None:
+    """只读下载：取 clip 元数据里的 CDN 明文音频，直接落盘（零解密）。"""
+    from sunoauxtool.download.sources.suno_web import SunoWebSource
+
+    source = SunoWebSource(cookie=cookie)
+    files = source.fetch(clip, out)
+    typer.echo(f"✅ 取回 {len(files)} 个文件:")
+    for item in files:
+        typer.echo(f"   {item.path}")
+
+
+app.add_typer(suno_web_app, name="suno-web")

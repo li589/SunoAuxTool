@@ -96,8 +96,9 @@ def test_download_sources_registry():
     from sunoauxtool.download.sources.base import discover_sources, list_sources
 
     reg = discover_sources()
-    assert set(reg) == {"catcatch", "suno-api", "haimeng", "tianyin", "usesuno"}
-    assert len(list_sources()) == 5  # 兼容旧签名仍在
+    assert set(reg) == {"catcatch", "suno-api", "haimeng", "tianyin", "usesuno",
+                       "relay-music", "suno-web"}
+    assert len(list_sources()) == 7  # 兼容旧签名仍在
 
 
 def test_video_visuals_registry_keeps_classes():

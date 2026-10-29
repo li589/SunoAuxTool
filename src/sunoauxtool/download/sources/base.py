@@ -53,6 +53,8 @@ def discover_sources() -> Dict[str, SourceAdapter]:
     """
     from sunoauxtool.download.sources.api import API_SOURCE_NAMES, ApiSource
     from sunoauxtool.download.sources.catcatch import CatCatchSource
+    from sunoauxtool.download.sources.relay_music import RelayMusicSource
+    from sunoauxtool.download.sources.suno_web import SunoWebSource
     from sunoauxtool.download.sources.usesuno import UseSunoSource
 
     from sunoauxtool.plugins import discover
@@ -61,6 +63,8 @@ def discover_sources() -> Dict[str, SourceAdapter]:
     for name in API_SOURCE_NAMES:
         builtins[name] = ApiSource(name)
     builtins["usesuno"] = UseSunoSource()
+    builtins["relay-music"] = RelayMusicSource()
+    builtins["suno-web"] = SunoWebSource()
     return discover("download_sources", builtins, base=SourceAdapter)
 
 

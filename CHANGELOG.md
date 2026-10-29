@@ -2,6 +2,30 @@
 
 本项目遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.0.0/) 风格。
 
+## [2.5.0] - 2026-10-29（Suno 双通道：中转站生成 + Web 凭证只读）
+
+**主题**：打通"生成真实音频"的最后一步。通道 A（中转站 `music` 模型）当天实测落地，
+通道 B（Web 凭证）P1 只读部分交付——端点待真实 Cookie 校准一次即可用。
+设计：docs/plan-suno-access-channels.md；F+（大谱表+分页）排期至 M4.5。
+
+### 新增
+- **`post relay-music`（通道 A，已实测）**：一句话描述 → `POST /v1/media/generate`
+  → 轮询 `GET /v1/tasks/{id}`（5s 间隔/上限可调）→ 下载 CDN 明文 mp3（Suno 惯例双版本）。
+  实测 60s 出片、≈0.48 元/条、89-92s 双版本 48kHz 立体声。`--task` 可只查已有任务；
+  `--dry-run` 脱敏自检；`--params` 透传模型参数；key 缺省回落 `SUNOAUX_AI_API_KEY`。
+- **`post suno-web`（通道 B，P1 只读）**：`login`（Cookie 校验，401 明确报过期不自动续期）/
+  `list`（feed 只读）/ `fetch`（clip_id → 下载全部音频版本）。**只导入现成 Cookie，
+  不做密码登录**；生成留 P2 默认关闭。feed/clip 端点做成常量 + 构造参数，
+  待真实 Cookie 一次校准。
+- **`post fetch` 新增两源**：`relay-music`（query=prompt）/ `suno-web`（query=clip_id），
+  自动接入既有 dry-run/错误码体系。
+- 错误码 **47** = 媒体生成任务失败/超时/无产物。
+
+### 数字
+- 全树 2382 例、覆盖率 91.09%；新增 relay-music（14 例：任务轮询/超时 47/失败 47/
+  凭证 25/双版本落盘/CLI 脱敏）与 suno-web（11 例：凭证分派/401→25/载荷归一化/下载）测试。
+
+
 ## [2.4.0] - 2026-10-29（M4 补强：错误并行收集——修复循环一轮看到全部问题）
 
 **主题**：拆掉 M4 的已知短板。此前 `SongSpec.from_dict` 每轮只报第一条错误，

@@ -25,6 +25,7 @@
     44 sunoauxtool.compose（清单结构/schema 非法）
     45 sunoauxtool.midi（MIDI 通道资源不足）
     46 sunoauxtool.compose.ai（AI 编曲生成失败：未配置/请求/解析/轮次耗尽）
+    47 sunoauxtool.download（媒体生成任务失败/超时：relay-music 任务式接口）
 """
 
 from __future__ import annotations
@@ -77,6 +78,7 @@ ERROR_CODES: List[Tuple[int, str, str]] = [
     # ---- sunoauxtool.midi 段（45，2.0 PR-A；40-44 留给 compose）----
     (45, "MIDI 通道不足", "midi：鼓轨冲突或旋律轨超过 15 条（通道 9 保留给鼓）"),
     (46, "AI 编曲生成失败", "compose ai：LLM 未配置/请求失败/响应无 TOML/修复轮次耗尽仍非法"),
+    (47, "媒体生成任务失败", "relay-music：媒体生成任务超时/失败/无音频产物"),
     # ---- sunoauxtool.compose 段（40 / 44，2.0 PR-C）----
     (40, "编曲清单非法", "compose：语义错误（小节数/段落衔接/音域/通道/音符越界），带 JSON Pointer"),
     (44, "清单 schema 校验失败", "compose：结构错误（缺字段/类型不符/未知字段/TOML 语法）"),
