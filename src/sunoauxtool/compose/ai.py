@@ -202,6 +202,8 @@ mix = { gain_db = -6.0, pan = -0.15, reverb_send = 0.18 }   # 可选
 - 和弦写法：根音+性质（"Dm" "F" "G7" "Am" "Bb" "Cmaj7"），降号用 b 不用 ♭。
 - 别写 [[track.note]]（手写音符），让 Arranger 按 energy 生成。
 - drums 轨不要 program；melody/counter 至少出现在 energy >= 0.6 的段落。
+- 配器要完整：流行/电子/摇滚类至少给出 bass 与 drums 轨（节奏组由 role 自动生成织体），
+  纯氛围/古典类可以省略；不要用两条同 role 轨凑数。
 - 全部中文注释可省略；不要输出 schema 之外的字段。
 """
 
