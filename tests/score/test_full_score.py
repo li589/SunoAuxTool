@@ -38,7 +38,7 @@ def _song(*, transpose: int = 0, extra_track: bool = False):
 
 class TestFromSong:
     def test_basic_metadata(self) -> None:
-        score = Score.from_song(_song())
+        score = Score.from_song(_song(), grand_staff=False)
         assert score.title == "夜航"
         assert score.key == "D minor"
         assert score.time_signature == "4/4"
@@ -47,7 +47,7 @@ class TestFromSong:
         assert len(score.tracks) == 4
 
     def test_track_metadata(self) -> None:
-        score = Score.from_song(_song())
+        score = Score.from_song(_song(), grand_staff=False)
         assert [track.name for track in score.tracks] == [
             "钢琴", "Bb单簧管", "贝斯", "鼓组",
         ]
@@ -57,7 +57,7 @@ class TestFromSong:
         assert score.tracks[3].is_drum is True
 
     def test_part_groups_by_role(self) -> None:
-        score = Score.from_song(_song(extra_track=True))
+        score = Score.from_song(_song(extra_track=True), grand_staff=False)
         assert [track.part_group for track in score.tracks] == [
             "键盘组", "键盘组", "旋律组", "低音组", "节奏组",
         ]
@@ -68,13 +68,13 @@ class TestFromSong:
 
     def test_notes_are_carried_over(self) -> None:
         song = _song()
-        score = Score.from_song(song)
+        score = Score.from_song(song, grand_staff=False)
         total = sum(len(track.notes) for track in score.tracks)
         expected = sum(len(clip.notes) for track in song.tracks for clip in track.clips)
         assert total >= expected  # 会补休止符，所以只会多不会少
 
     def test_transpose_propagated(self) -> None:
-        score = Score.from_song(_song(transpose=2))
+        score = Score.from_song(_song(transpose=2), grand_staff=False)
         clarinet = score.tracks[1]
         assert clarinet.transpose == 2
         assert clarinet.is_transposing
@@ -96,18 +96,18 @@ class TestFromSong:
         song = _song()
         song.sections[1].start = 7.5  # 破坏段落首尾相接
         with pytest.raises(ParameterError):
-            Score.from_song(song)
+            Score.from_song(song, grand_staff=False)
 
 
 class TestParts:
     def test_split_one_per_track(self) -> None:
-        score = Score.from_song(_song())
+        score = Score.from_song(_song(), grand_staff=False)
         parts = score.parts()
         assert len(parts) == len(score.tracks)
         assert [part.tracks[0].name for part in parts] == [t.name for t in score.tracks]
 
     def test_parts_keep_metadata(self) -> None:
-        score = Score.from_song(_song(transpose=2))
+        score = Score.from_song(_song(transpose=2), grand_staff=False)
         part = score.parts()[1]
         assert part.title.endswith("Bb单簧管")
         assert part.key == score.key
@@ -116,13 +116,13 @@ class TestParts:
         assert part.tracks[0].transpose == 2
 
     def test_single_track_score_has_one_part(self) -> None:
-        score = Score.from_song(_song())
+        score = Score.from_song(_song(), grand_staff=False)
         assert len(score.parts()) == 4
 
 
 class TestMusicXml:
     def _root(self, song, **kwargs) -> ET.Element:
-        score = Score.from_song(song)
+        score = Score.from_song(song, grand_staff=False)
         return validate_musicxml(render_musicxml(score, kwargs.pop("options", None)))
 
     def test_valid_structure(self) -> None:
@@ -144,7 +144,7 @@ class TestMusicXml:
     def test_written_pitch_is_transposed(self) -> None:
         """Bb 单簧管：记谱比实音高 2 个半音（实测 F4 实音 → G4 记谱）。"""
         song = _song(transpose=2)
-        score = Score.from_song(song)
+        score = Score.from_song(song, grand_staff=False)
         clarinet_index = [track.transpose for track in score.tracks].index(2)
         root = validate_musicxml(render_musicxml(score))
         part = root.findall("part")[clarinet_index]
@@ -175,7 +175,7 @@ class TestMusicXml:
         ]
 
     def test_part_groups_can_be_disabled(self) -> None:
-        score = Score.from_song(_song())
+        score = Score.from_song(_song(), grand_staff=False)
         root = validate_musicxml(render_musicxml(
             score, MusicXmlOptions(include_part_groups=False)
         ))
@@ -184,19 +184,19 @@ class TestMusicXml:
     def test_part_group_spans_merge_consecutive(self) -> None:
         from sunoauxtool.score.musicxml import _part_group_spans
 
-        score = Score.from_song(_song(extra_track=True))
+        score = Score.from_song(_song(extra_track=True), grand_staff=False)
         spans = _part_group_spans(score)
         assert spans[0] == (0, 1, "键盘组")
 
     def test_part_score_musicxml(self) -> None:
-        score = Score.from_song(_song())
+        score = Score.from_song(_song(), grand_staff=False)
         part = score.parts()[1]
         root = validate_musicxml(render_musicxml(part))
         assert len(root.findall("part")) == 1
 
     def test_deterministic_output(self) -> None:
-        first = render_musicxml(Score.from_song(_song()))
-        second = render_musicxml(Score.from_song(_song()))
+        first = render_musicxml(Score.from_song(_song(), grand_staff=False))
+        second = render_musicxml(Score.from_song(_song(), grand_staff=False))
         assert first == second
 
     @pytest.mark.parametrize("transpose", [-2, 2, -3, 7])

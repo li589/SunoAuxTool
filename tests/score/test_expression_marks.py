@@ -96,7 +96,7 @@ class TestSectionMarks:
         assert piano.wedge_ends == {6: True, 10: True}
 
     def test_drums_get_no_marks(self) -> None:
-        drums = _score().tracks[2]
+        drums = next(t for t in _score().tracks if t.is_drum)
         assert drums.is_drum
         assert drums.dynamics == {} and drums.wedges == {}
 

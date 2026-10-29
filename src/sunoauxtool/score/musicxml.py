@@ -240,6 +240,12 @@ def _build_root(score: Score, opts: MusicXmlOptions) -> ET.Element:
     starts = {start: (number, name) for number, (start, _end, name)
               in enumerate(spans, start=1)}
     ends = {end: number for number, (_start, end, _name) in enumerate(spans, start=1)}
+    # 大谱表用 brace 组（与上面的 bracket 分谱组并存，编号接续）
+    brace_spans = _brace_spans(score) if opts.include_part_groups else []
+    brace_starts = {start: number for number, (start, _end)
+                    in enumerate(brace_spans, start=len(spans) + 1)}
+    brace_ends = {end: number for number, (_start, end)
+                  in enumerate(brace_spans, start=len(spans) + 1)}
     for index, track in enumerate(score.tracks):
         if index in starts:
             number, name = starts[index]
@@ -247,7 +253,18 @@ def _build_root(score: Score, opts: MusicXmlOptions) -> ET.Element:
                                    {"type": "start", "number": str(number)})
             ET.SubElement(marker, "group-name").text = name
             ET.SubElement(marker, "group-symbol").text = "bracket"
+        if index in brace_starts:
+            marker = ET.SubElement(
+                part_list, "part-group",
+                {"type": "start", "number": str(brace_starts[index])},
+            )
+            ET.SubElement(marker, "group-name").text = "Piano"
+            ET.SubElement(marker, "group-symbol").text = "brace"
         _build_score_part(part_list, track, index, opts)
+        # 关闭顺序必须 LIFO：先关内层 brace，再关外层 bracket
+        if index in brace_ends:
+            ET.SubElement(part_list, "part-group",
+                          {"type": "stop", "number": str(brace_ends[index])})
         if index in ends:
             ET.SubElement(part_list, "part-group",
                           {"type": "stop", "number": str(ends[index])})
@@ -255,6 +272,26 @@ def _build_root(score: Score, opts: MusicXmlOptions) -> ET.Element:
     for index, track in enumerate(score.tracks):
         root.append(_build_part(score, track, index, opts))
     return root
+
+
+def _brace_spans(score: Score) -> List[tuple[int, int]]:
+    """大谱表（``ScoreTrack.brace`` 非空）的相邻配对 ``[(上行下标, 下行下标)]``（2.6）。"""
+    spans: List[tuple[int, int]] = []
+    index = 0
+    tracks = score.tracks
+    while index < len(tracks):
+        brace = str(getattr(tracks[index], "brace", "") or "")
+        if not brace:
+            index += 1
+            continue
+        end = index
+        while (end + 1 < len(tracks)
+               and str(getattr(tracks[end + 1], "brace", "") or "") == brace):
+            end += 1
+        if end > index:
+            spans.append((index, end))
+        index = end + 1
+    return spans
 
 
 def _part_group_spans(score: Score) -> List[tuple[int, int, str]]:

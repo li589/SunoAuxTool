@@ -434,7 +434,14 @@ def score(
     parts: bool = typer.Option(False, "--parts", help="额外导出每声部分谱"),
     composer: str = typer.Option("", "--composer", help="作曲者署名"),
     no_part_groups: bool = typer.Option(
-        False, "--no-part-groups", help="MusicXML 不输出分谱组括号"
+        False, "--no-part-groups", help="MusicXML 不输出任何分组标记（bracket/brace）"
+    ),
+    grand_staff: bool = typer.Option(
+        True, "--grand-staff/--no-grand-staff",
+        help="钢琴/键盘家族自动两行大谱表（2.6；默认开）",
+    ),
+    systems_per_page: int = typer.Option(
+        0, "--systems-per-page", help="每页系统数（0=不分页，出单张长图）"
     ),
     scale: float = typer.Option(2.0, "--scale", help="PNG 超采样倍数"),
     no_arrange: bool = typer.Option(
@@ -477,6 +484,8 @@ def score(
             composer=composer,
             part_groups=not no_part_groups,
             scale=scale,
+            grand_staff=grand_staff,
+            systems_per_page=systems_per_page,
         ),
     )
     typer.echo(f"已导出总谱 → {out_dir}")

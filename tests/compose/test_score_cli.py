@@ -74,8 +74,10 @@ class TestBuildScore:
         score = build_score(_song(song_path), composer="齐见林")
         assert score.title == "夜航"
         assert score.composer == "齐见林"
-        assert [track.name for track in score.tracks] == ["钢琴", "Bb单簧管", "贝斯"]
-        assert score.tracks[1].transpose == 2
+        # 2.6 起钢琴自动拆两行大谱表：两轨同名、brace 相同，移调轨紧随其后
+        assert [track.name for track in score.tracks] == ["钢琴", "钢琴", "Bb单簧管", "贝斯"]
+        assert score.tracks[0].brace == score.tracks[1].brace == "piano"
+        assert score.tracks[2].transpose == 2
 
     def test_part_groups_disabled(self, song_path: Path) -> None:
         score = build_score(_song(song_path), part_groups=False)

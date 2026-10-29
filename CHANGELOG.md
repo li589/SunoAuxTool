@@ -2,6 +2,43 @@
 
 本项目遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.0.0/) 风格。
 
+## [2.6.0] - 2026-10-29（M4.5 / F+：钢琴两行大谱表 + 分页 + 低音谱号重绘）
+
+**主题**：把总谱从"能看"推到"能出版"的两块地基——键盘乐器的两行谱表，以及分页。
+
+### 新增
+- **大谱表（钢琴两行谱）**：`role` 为 harmony/arpeggio 且 GM 0..11 的轨在 `Score`
+  层自动拆两行（右手 ≥60 / 左手 <60），同名 + `brace="piano"`；
+  SVG/PNG 画左侧花括号（双 S 曲线在左侧中点收成喙）、对内行距收窄
+  （`grand_staff_gap=10`）、小节线跨两行贯通；MusicXML 用
+  `<part-group symbol="brace">` + `<group-name>Piano</group-name>` 连接两个 part，
+  与 bracket 分谱组**嵌套且 LIFO 收口**。`--grand-staff/--no-grand-staff` 可关。
+- **分页**：`--systems-per-page N` 切成多页文件（`<曲名>-page01.svg` …），
+  首页画标题、每页页脚 `第 N / M 页`；切页只重排纵向堆叠（同一份排版结果切分），
+  逐页小节宽度完全一致。`paginate_layout()` 为公开 API。
+- `--no-part-groups` 语义升级：不输出**任何**分组标记（bracket + brace）；
+  此前 MusicXML 侧漏传该开关（brace 组会漏出）。
+
+### 修复
+- **低音谱号主体重绘**：旧路径的四段贝塞尔其实是个圆（注释写"右侧收尖"但控制点
+  没形成尖），SVG/PNG 一直渲染成实心黑圆——用户报障高音谱号时顺带发现。
+  新字形：318° 圆弧 + **向内深挖**的缺口 + 右上喙尖（落在 F 线上），
+  缺口用参数化圆弧生成（每 79.5° 一段三次贝塞尔，(4/3)·tan(α/4) 控制点系数）。
+- 高音谱号花括号首次实装时的两个坑：坐标是 space 单位却没乘 space-scale
+  （画到页角）、单段 1/4 椭圆弧只看成"<"（改为双 S 曲线）。
+
+### 变更
+- `ScoreTrack.brace` 新字段；`Score.from_song(grand_staff=True)`、
+  `build_score(grand_staff=True)`、`ScoreOptions.grand_staff/systems_per_page`。
+- `describe_score` 的声部数按 brace 合并计数（钢琴两行算 1 个声部）。
+
+### 数字
+- 全树 **2408 例**、覆盖率 **91.16%**；新增 test_grand_staff（18 例）、
+  test_pagination（15 例）。
+- 已知边界：MusicXML 仍为"两个 part + brace 组"（非单 part 双 staff），
+  跨行连谱号/跨行符干、跨页连线续绘留后续。
+
+
 ## [2.5.0] - 2026-10-29（Suno 双通道：中转站生成 + Web 凭证只读）
 
 **主题**：打通"生成真实音频"的最后一步。通道 A（中转站 `music` 模型）当天实测落地，

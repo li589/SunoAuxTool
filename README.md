@@ -299,8 +299,8 @@ sunoauxtool ai diffrhythm --prompt "slow ballad" --lyrics "第一句词" --durat
 > 现状：2.0 多轨内核 → 2.1 每轨独立音源库 + 跨库响度对齐 → 2.2 表现力
 > （演奏法/力度记号/渐强渐弱/摇摆/段落弹性速度）→ 2.3 AI 编曲闭环
 > （`compose ai "一句话需求"` → LLM 清单 → 校验修复循环 → 直连 build）→ 2.4 错误并行收集；
-> 2.5 Suno 双通道（`post relay-music` 中转站生成 + `post suno-web` Web 凭证只读），
-> F+ 大谱表 + 分页已排期（docs/plan-2.0-multitrack.md M4.5）。
+> 2.5 Suno 双通道（`post relay-music` 中转站生成 + `post suno-web` Web 凭证只读）；
+> 2.6 F+ 大谱表（钢琴两行谱 + 花括号）+ 分页（`--systems-per-page`）。
 
 ---
 

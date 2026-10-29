@@ -351,8 +351,9 @@ L0  外部      FluidSynth + SoundFont · ffmpeg · （未来）SFZ/VST 后端
 
 ### M4.5 · 2.5.0 出版级总谱 + Suno 接入（已排期 2026-10-29）
 
-- [ ] **F+ 大谱表**：钢琴/键盘类两行谱（treble+bass 双谱表、跨行符干与声部分配），
-  SVG/PNG/MusicXML 三路同几何；分页（每页小节数自适应，页眉页脚）。
+- [x] **F+ 大谱表**：钢琴/键盘类两行谱（treble+bass、右手/左手按 MIDI 60 分界）、
+  SVG/PNG/MusicXML 三路同几何（2.6.0 交付；跨行连谱号/符干留后续）。
+- [x] **分页**：`--systems-per-page N` 多页文件、首页标题、页脚页码（2.6.0 交付）。
 - [x] **Suno 通道 A**：`post relay-music` 中转站生成（2.5.0 已交付，实测 60s 出片/双版本/≈0.48 元）。
 - [x] **Suno 通道 B（P1）**：`post suno-web` Web 凭证只读（2.5.0 交付；端点待真实 Cookie 校准）。
 - [ ] Suno 通道 B（P2，默认关闭）：Web 凭证生成；`compose import` 音频反推清单草案。

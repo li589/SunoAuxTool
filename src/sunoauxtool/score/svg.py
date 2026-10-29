@@ -102,14 +102,16 @@ TREBLE_CLEF = (
     "C 1.85,2.15 1.25,1.95 1.05,2.45 "
     "C 0.92,2.80 1.05,3.15 0.72,3.10"
 )
-#: 低音谱号主体（实心豆形，右侧收尖于 F3 线）
+#: 低音谱号主体（实心）：318° 圆弧 + **向内深挖**的缺口 + 右上喙尖。
+#: 圆心 (-0.10,0.95)（F 线 y=1 上）、半径 1.5；缺口开口朝右（tail 起笔处），
+#: 收口曲线必须向圆心方向深挖才切得出来——贴着圆周走等于没切（2.6 踩过）。
+#: 弧由参数化公式生成（每 79.5° 一段三次贝塞尔，控制点系数 (4/3)·tan(α/4)）。
 BASS_CLEF_BODY = (
-    "M 1.45,0.30 "
-    "C 1.20,-0.25 0.72,-0.62 0.05,-0.55 "
-    "C -0.78,-0.48 -1.32,0.10 -1.32,0.98 "
-    "C -1.32,1.84 -0.70,2.40 0.15,2.32 "
-    "C 0.92,2.24 1.42,1.70 1.48,1.05 "
-    "C 1.52,0.68 1.50,0.45 1.45,0.30 Z"
+    "M 1.385,0.741 C 1.285,0.025 0.688,-0.517 -0.035,-0.549 "
+    "C -0.757,-0.580 -1.399,-0.092 -1.562,0.613 "
+    "C -1.724,1.317 -1.361,2.037 -0.698,2.326 "
+    "C -0.035,2.614 0.739,2.388 1.144,1.789 "
+    "C 0.62,1.30 0.86,0.86 1.58,0.72 Z"
 )
 #: 低音谱号右上细尾
 BASS_CLEF_TAIL = "M 1.38,0.28 C 1.72,0.06 2.00,0.30 2.05,0.72 C 2.09,1.06 1.98,1.36 1.80,1.54"
@@ -344,6 +346,8 @@ class ScoreSvgRenderer:
                 self._system_right = staff.measures[-1].right if staff.measures else 0.0
                 self._staff_lines(staff, bottom)
                 self._signature(staff, bottom, with_time_signature=is_first)
+                if staff_index == 0 and system.brace_pairs:
+                    self._draw_braces(system)
                 for measure in staff.measures:
                     self._measure_content(measure, bottom, show_number=staff_index == 0)
                 self._draw_expression(staff, bottom)
@@ -374,6 +378,50 @@ class ScoreSvgRenderer:
         for i in range(5):
             y = bottom - (4 - i) * self.space
             self.canvas.line(x1, y, x2, y, self._w(STAFF_LINE_W), self.theme.ink)
+
+    def _draw_braces(self, system) -> None:
+        """大谱表花括号：brace 连接的两行谱表左侧画 '{'（2.6）。
+
+        形态照记谱惯例：中点在左侧形成"喙"，上下两端收在谱线左缘；
+        两段三次贝塞尔在喙处相接（喙是 brace 唯一的"角"，属记号本义）。
+        """
+        margin = self.layout.options.margin
+        for upper_idx, lower_idx in system.brace_pairs:
+            upper = system.staffs[upper_idx]
+            lower = system.staffs[lower_idx]
+            if not upper.measures or not lower.measures:
+                continue
+            top_y = system.y + upper.y - 4 * self.space
+            bottom_y = system.y + lower.y
+            h = (bottom_y - top_y) / self.space
+            if h <= 0:  # pragma: no cover - 配对必然跨正高度
+                continue
+            # 花括号：上下各两段贝塞尔——先"肩"（外鼓）再收到中点"喙"，
+            # 这才是 "{" 的标准骨架（单段椭圆弧只会画成 "<"，2.6 踩过）。
+            # 右缘必须落在谱线左端之外（谱线自 margin-1.5*space 起），
+            # 否则会压到低音谱号的豆形上（2.6 踩过）
+            x = (margin - 2.95 * self.space) / self.space
+            y0 = top_y / self.space
+            w = 1.2
+            d = (
+                f"M {x + w:.3f},{y0:.3f} "
+                f"C {x + 0.95 * w:.3f},{y0 + 0.10 * h:.3f} "
+                f"{x + 0.82 * w:.3f},{y0 + 0.26 * h:.3f} "
+                f"{x + 0.62 * w:.3f},{y0 + 0.36 * h:.3f} "
+                f"C {x + 0.38 * w:.3f},{y0 + 0.44 * h:.3f} "
+                f"{x + 0.18 * w:.3f},{y0 + 0.47 * h:.3f} "
+                f"{x:.3f},{y0 + 0.50 * h:.3f} "
+                f"C {x + 0.18 * w:.3f},{y0 + 0.53 * h:.3f} "
+                f"{x + 0.38 * w:.3f},{y0 + 0.56 * h:.3f} "
+                f"{x + 0.62 * w:.3f},{y0 + 0.64 * h:.3f} "
+                f"C {x + 0.82 * w:.3f},{y0 + 0.74 * h:.3f} "
+                f"{x + 0.95 * w:.3f},{y0 + 0.90 * h:.3f} "
+                f"{x + w:.3f},{y0 + h:.3f}"
+            )
+            with self.canvas.group(f"scale({self.space:.4f})"):
+                self.canvas.path(
+                    d, "none", stroke=self.theme.ink, stroke_width=0.27
+                )
 
     def _signature(self, staff: LaidStaff, bottom: float, *, with_time_signature: bool) -> None:
         """谱号 + 调号（每个系统都画）；拍号只在首个系统画（后续系统省略是常规做法）。"""
@@ -890,10 +938,13 @@ class ScoreSvgRenderer:
     # -- 页眉页脚 --------------------------------------------------------
 
     def _page_text(self) -> None:
-        """标题、署名、速度标记与调号说明。"""
+        """标题、署名、速度标记与调号说明；多页时只有首页画标题（2.6）。"""
         opts = self.layout.options
         score = self.layout.score
         space = self.space
+        if not self.layout.show_title:
+            self._page_footer()
+            return
         title = self.opts.title if self.opts.title is not None else score.title
         composer = self.opts.composer if self.opts.composer is not None else score.composer
 
@@ -910,6 +961,7 @@ class ScoreSvgRenderer:
                 anchor="end", style="italic",
             )
         if not self.opts.show_tempo or not self.layout.systems:
+            self._page_footer()
             return
         y = self.layout.systems[0].y - 1.0 * space
         mark_right = draw_tempo_mark(
@@ -923,6 +975,19 @@ class ScoreSvgRenderer:
             self.layout.page_width - opts.margin, y,
             f"{score.key}  ·  {score.time_signature}  ·  {score.bars} 小节",
             1.10 * space, self.theme.faint, self.opts.font_family, anchor="end",
+        )
+        self._page_footer()
+
+    def _page_footer(self) -> None:
+        """页码：多页谱在页脚居中写"第 N / M 页"（2.6）。"""
+        if self.layout.page_total <= 1:
+            return
+        space = self.space
+        self.canvas.text(
+            self.layout.page_width / 2.0,
+            self.layout.page_height - space * 1.2,
+            f"第 {self.layout.page_number} / {self.layout.page_total} 页",
+            1.1 * space, self.theme.faint, self.opts.font_family, anchor="middle",
         )
 
 

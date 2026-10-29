@@ -247,8 +247,10 @@ sunoaux compose score night/song.toml -o out/night/score         --format svg,pn
 | `--format svg,png,musicxml` | 可多选（`xml` 是 `musicxml` 的别名） |
 | `--parts` | 额外导出每声部分谱到 `parts/` |
 | `--composer` | 署名（写进 SVG 标题区与 MusicXML `<creator>`） |
-| `--no-part-groups` | 不输出 `<part-group>` 括号 |
+| `--no-part-groups` | 不输出任何分组标记（bracket 分谱组 + brace 大谱表） |
 | `--scale` | PNG 超采样倍数（默认 2.0） |
+| `--grand-staff/--no-grand-staff` | 钢琴/键盘家族自动两行大谱表（2.6，默认开） |
+| `--systems-per-page N` | 每页 N 个系统分页（0 = 不分页，出单张长图） |
 
 产物：`<曲名>.svg/.png/.musicxml`（总谱）+ `parts/<声部>.*`（分谱）。
 
@@ -261,9 +263,30 @@ sunoaux compose score night/song.toml -o out/night/score         --format svg,pn
 | 分谱组 | 按角色自动分组（键盘组/弦乐组/低音组/旋律组/节奏组），MusicXML `<part-group type="start|stop">` + 括号 |
 | 分谱 | `Score.parts()` 逐声部拆成独立谱（保留标题/调号/拍号/小节数/移调） |
 
-> **已知范围**：SVG/PNG 按**实音**绘制（移调只体现在 MusicXML）；
-> 大谱表（钢琴两行谱）与分页尚在 PR-F 之后单开。另：符干长度偏长的视觉问题
-> 属 1.7.0 起的既有渲染行为（旧管线同样存在），不在本 PR 改动范围内。
+### 7.1 大谱表：钢琴两行谱（2.6 F+）
+
+`role` 为 `harmony`/`arpeggio` 且 GM 音色在 0..11（钢琴/键盘家族）的轨，会在
+`Score` 层自动拆成**两行谱表**：
+
+- 右手（≥ MIDI 60，中央 C 及以上）→ 高音谱表，左手（<60）→ 低音谱表；
+- 两轨同名、`brace="piano"`：SVG/PNG 画左侧花括号、对内行距收窄（`grand_staff_gap`）、
+  小节线跨两行贯通；MusicXML 用 `<part-group symbol="brace">` 连接两个 part
+  （`<group-name>Piano</group-name>`，与 bracket 分谱组嵌套且 LIFO 收口）；
+- `--no-grand-staff` 关闭（回到单行谱表）。
+
+> 已知边界：MusicXML 侧目前是"两个 part + brace 组"，不是单 part 双 staff
+> （`<staves>2</staves>`），因此跨行连谱号/跨行符干留在下一轮。
+
+### 7.2 分页（2.6 F+）
+
+`--systems-per-page N` 按每页 N 个系统切页：每页独立文件
+`<曲名>-page01.svg`、`-page02.svg`…（PNG 同）；**只有首页画标题区**，
+每页页脚居中写 `第 N / M 页`。切页只重排纵向堆叠，小节横向几何逐页一致
+（同一份 `layout_score` 结果切分，不重新测量宽度）。
+
+> 已知边界：跨页的延音线/符杠会在页边截断（不重绘连接弧）。
+
+> **其他已知范围**：SVG/PNG 按**实音**绘制（移调只体现在 MusicXML）。
 
 ## 8. 音源库（PR-G）
 

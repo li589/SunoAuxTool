@@ -116,6 +116,8 @@ class LayoutOptions:
     system_gap: float = 26.0
     #: 同一系统内相邻谱表之间的间距
     staff_gap: float = 22.0
+    #: 大谱表（brace 连接的两行）内部的谱表间距（2.6）
+    grand_staff_gap: float = 10.0
     #: 首行缩进（留给谱号 + 调号 + 拍号）
     first_indent: float = 86.0
     #: 后续行的缩进（只需留谱号）
@@ -126,6 +128,8 @@ class LayoutOptions:
     max_stretch: float = 1.35
     #: 预留的标题区高度
     title_height: float = 118.0
+    #: 每页系统数（0 = 不分页，全部堆在一张长图上；2.6 分页）
+    systems_per_page: int = 0
 
     @property
     def content_width(self) -> float:
@@ -215,6 +219,7 @@ class LaidStaff:
     clef: str
     y: float                     # 最下线 y
     measures: List[LaidMeasure] = field(default_factory=list)
+    brace: str = ""              # 非空 = 与相邻同标记谱表组成大谱表（2.6）
 
     def line_y(self, index: int, space: float) -> float:
         """第 index 条线（0 = 最上线）的 y。"""
@@ -230,6 +235,8 @@ class System:
     height: float
     space: float
     staffs: List[LaidStaff] = field(default_factory=list)
+    #: 大谱表配对：[(上行 staff 下标, 下行 staff 下标)]（staffs 内下标，2.6）
+    brace_pairs: List[Tuple[int, int]] = field(default_factory=list)
 
     @property
     def first_measure(self) -> int:
@@ -259,6 +266,11 @@ class ScoreLayout:
     key_acc: Dict[int, int] = field(default_factory=dict)
     prefer_flats: bool = False
     note_count: int = 0
+    #: 分页信息（2.6）：单页排版时恒为 1/1
+    page_number: int = 1
+    page_total: int = 1
+    #: 是否画标题区（多页时只有首页画）
+    show_title: bool = True
 
     @property
     def space(self) -> float:
@@ -922,7 +934,8 @@ def _align_beam_endpoints(clusters: Sequence[LaidCluster]) -> None:
 # ---------------------------------------------------------------------------
 
 def _staff_vertical_extent(
-    staff_measures: Sequence[LaidMeasure], space: float, *, marks: bool = False
+    staff_measures: Sequence[LaidMeasure], space: float, *, marks: bool = False,
+    compact: bool = False,
 ) -> Tuple[float, float]:
     """求一条谱表需要向上/向下预留的空间（单位 space）。
 
@@ -930,6 +943,8 @@ def _staff_vertical_extent(
     避免行距被压扁导致上行符杠与下行加线相撞。
 
     ``marks=True`` 表示该谱表下方还要画力度记号/楔形（约 3 space），需额外行距。
+    ``compact=True`` 用于大谱表对内的谱表：上下保底收窄（brace 已给出"这是一件
+    乐器"的视觉关系，行距应明显小于普通谱表间距）。
     """
     above_steps = 0
     below_steps = 0
@@ -945,8 +960,9 @@ def _staff_vertical_extent(
                     above_steps = max(above_steps, max(c.step_offsets) + 2 * c.stem_len - 8)
                 else:
                     below_steps = max(below_steps, -(min(c.step_offsets) - 2 * c.stem_len))
-    above = max(above_steps / 2.0, 4.2)
-    below = max(below_steps / 2.0, 3.6) + (3.0 if marks else 0.0)
+    above = max(above_steps / 2.0, 2.8 if compact else 4.2)
+    below_base = 3.0 if compact else 3.6
+    below = max(below_steps / 2.0, below_base) + (3.0 if marks else 0.0)
     return above, below
 
 
@@ -1072,24 +1088,49 @@ def layout_score(score: Score, options: Optional[LayoutOptions] = None) -> Score
                     clef=track.clef,
                     y=0.0,
                     measures=staff_measures,
+                    brace=str(getattr(track, "brace", "") or ""),
                 )
             )
 
-        # --- 纵向排布 ---
+        # --- 纵向排布（大谱表对内行距更近，对间恢复常规间距）---
         cursor_y = 0.0
         heights: List[float] = []
         tops: List[float] = []
+        brace_pairs: List[Tuple[int, int]] = []
+        brace_run: list[int] = []
+        for t_idx, staff in enumerate(staffs):
+            if staff.brace:
+                brace_run.append(t_idx)
+            else:
+                if len(brace_run) >= 2:
+                    brace_pairs.append((brace_run[0], brace_run[-1]))
+                brace_run = []
+        if len(brace_run) >= 2:
+            brace_pairs.append((brace_run[0], brace_run[-1]))
+        brace_staves = {
+            idx for pair in brace_pairs for idx in range(pair[0], pair[1] + 1)
+        }
         for t_idx, staff in enumerate(staffs):
             # 谱表下方还要放力度记号与渐变楔形时，多留一点行距（否则与下一行相撞）
             marks = False
             if 0 <= staff.track_index < len(score.tracks):
                 track = score.tracks[staff.track_index]
                 marks = bool(track.dynamics or track.wedges)
-            above, below = _staff_vertical_extent(staff.measures, space, marks=marks)
+            compact = t_idx in brace_staves
+            above, below = _staff_vertical_extent(
+                staff.measures, space, marks=marks, compact=compact
+            )
             top = cursor_y + above * space + 6.0
             heights.append(above * space + STAFF_SPACES * space + below * space + 12.0)
             tops.append(top)
-            cursor_y += heights[-1] + opts.staff_gap
+            # 与下一个谱表同属一件大谱表时用更近的行距（brace 语义在"对内"）
+            next_in_brace = (
+                t_idx + 1 < len(staffs)
+                and bool(staff.brace)
+                and staffs[t_idx + 1].brace == staff.brace
+            )
+            gap = opts.grand_staff_gap if next_in_brace else opts.staff_gap
+            cursor_y += heights[-1] + gap
 
         if cursor_y > 0:
             cursor_y -= opts.staff_gap  # 末个谱表后不加谱表间距
@@ -1100,6 +1141,7 @@ def layout_score(score: Score, options: Optional[LayoutOptions] = None) -> Score
             height=cursor_y,
             space=space,
             staffs=staffs,
+            brace_pairs=brace_pairs,
         )
         for staff, top in zip(staffs, tops):
             staff.y = top + STAFF_SPACES * space  # 最下线 y（系统内相对坐标）
@@ -1114,3 +1156,51 @@ def layout_score(score: Score, options: Optional[LayoutOptions] = None) -> Score
         cursor_y -= opts.system_gap
     layout.page_height = cursor_y + opts.margin
     return layout
+
+
+def paginate_layout(layout: ScoreLayout, systems_per_page: int) -> List[ScoreLayout]:
+    """把单页排版结果按"每页 N 个系统"切成多页（2.6）。
+
+    只重排每页内系统的纵向位置与页高，**不改小节几何**——小节的 x 坐标在
+    切页前就已经定死，翻页只影响纵向堆叠，因此页与页之间的小节宽度完全一致。
+
+    Args:
+        layout: ``layout_score()`` 的产物（单页）。
+        systems_per_page: 每页系统数；``<= 0`` 或不足一页时原样返回 ``[layout]``。
+
+    Returns:
+        每页一个 ``ScoreLayout``（``page_number``/``page_total``/``show_title`` 已填）。
+    """
+    import copy
+
+    per = int(systems_per_page or 0)
+    if per <= 0 or len(layout.systems) <= per:
+        return [layout]
+    chunks = [layout.systems[i:i + per] for i in range(0, len(layout.systems), per)]
+    total = len(chunks)
+    opts = layout.options
+    pages: List[ScoreLayout] = []
+    for number, chunk in enumerate(chunks, start=1):
+        systems = copy.deepcopy(chunk)  # y 会被重排，必须独立副本
+        page = ScoreLayout(
+            score=layout.score,
+            options=opts,
+            systems=systems,
+            page_width=layout.page_width,
+            fifths=layout.fifths,
+            key_acc=layout.key_acc,
+            prefer_flats=layout.prefer_flats,
+            note_count=layout.note_count,
+            page_number=number,
+            page_total=total,
+            show_title=number == 1,
+        )
+        cursor_y = opts.margin + (opts.title_height if number == 1 else 0.0)
+        for system in systems:
+            system.y = cursor_y
+            cursor_y += system.height + opts.system_gap
+        if systems:
+            cursor_y -= opts.system_gap
+        page.page_height = cursor_y + opts.margin
+        pages.append(page)
+    return pages

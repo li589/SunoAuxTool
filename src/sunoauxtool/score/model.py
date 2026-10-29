@@ -116,6 +116,10 @@ class ScoreTrack:
     """移调（半音）。正值表示记谱音高比实音高（如 Bb 单簧管 +2）。"""
     part_group: str = ""
     """分谱组名（同名的连续声部在 MusicXML 里用括号连成一个 part-group）。"""
+    brace: str = ""
+    """大谱表分组标记（2.6）：非空表示与**相邻同标记**的谱表组成一件乐器
+    （如钢琴两行谱）——SVG/PNG 画花括号、MusicXML 用 ``symbol="brace"`` 的
+    part-group 连接。当前只支持相邻两行。"""
     notes: List[ScoreNote] = field(default_factory=list)
     measures: List[ScoreMeasure] = field(default_factory=list)
     dynamics: Dict[int, str] = field(default_factory=dict)
@@ -313,8 +317,9 @@ class Score:
         bars: Optional[int] = None,
         clefs: Optional[Dict[str, str]] = None,
         part_groups: bool = True,
+        grand_staff: bool = True,
     ) -> "Score":
-        """从 2.0 的 ``compose.Song`` 构建乐谱（多轨 + 移调 + 分谱组）。
+        """从 2.0 的 ``compose.Song`` 构建乐谱（多轨 + 移调 + 分谱组 + 大谱表）。
 
         与 ``from_document`` 的区别：Song 自带速度表/拍号表/调性/段落，
         且每轨有 ``role``/``transpose``，因此这里能直出**记谱用**的谱面元数据。
@@ -326,25 +331,37 @@ class Score:
             bars: 小节数；None 用 Song 的小节数（含弱起前的段首对齐）。
             clefs: ``{轨道名: "treble"|"bass"}`` 覆盖自动谱号判定。
             part_groups: 是否按角色把同族乐器归入同一 part-group（弦乐组/节奏组）。
+            grand_staff: 钢琴/键盘家族轨（harmony/arpeggio + GM 0..11）自动拆成
+                两行大谱表（右手 ≥60 / 左手 <60，brace 连接）；2.6 起默认开。
 
         Returns:
-            Score 实例（``transpose``/``part_group`` 已填好）。
+            Score 实例（``transpose``/``part_group``/``brace`` 已填好）。
         """
         from sunoauxtool.score.theory import beats_per_measure
 
         song.validate()  # 谱面只接受已编排完成的曲子（空曲/半成品应尽早失败）
         meter = song.meter_map[0]
         time_signature = f"{meter.numerator}/{meter.denominator}"
-        raw = []
+        raw: List[Tuple[str, int, int, bool, List[object]]] = []
+        owners: List[object] = []      # raw[i] 来自哪个 song 轨（大谱表拆分后共享）
+        brace_marks: List[str] = []    # raw[i] 的大谱表标记（"" = 独行谱表）
         for track in song.tracks:
             notes = [note for clip in track.clips for note in clip.notes]
-            raw.append((
-                track.name or track.id,
-                int(track.instrument.resolved_program()),
-                int(track.channel or 0),
-                bool(track.is_drum),
-                notes,
-            ))
+            program = int(track.instrument.resolved_program())
+            name = track.name or track.id
+            if grand_staff and _is_piano_family(track, program) and notes:
+                upper, lower = _split_hands(notes)
+                raw.append((name, program, int(track.channel or 0), False, upper))
+                brace_marks.append("piano")
+                owners.append(track)
+                raw.append((name, program, int(track.channel or 0), False, lower))
+                brace_marks.append("piano")
+                owners.append(track)
+            else:
+                raw.append((name, program, int(track.channel or 0),
+                            bool(track.is_drum), notes))
+                brace_marks.append("")
+                owners.append(track)
         last_beat = 0.0
         for *_meta, notes in raw:
             for note in notes:
@@ -361,10 +378,12 @@ class Score:
             last_beat=last_beat,
             capacity=beats_per_measure(time_signature),
         )
-        for score_track, track in zip(score.tracks, song.tracks):
+        for score_track, track, brace in zip(score.tracks, owners, brace_marks):
             score_track.transpose = int(getattr(track, "transpose", 0) or 0)
             if part_groups:
                 score_track.part_group = _group_of(track.role)
+            if brace:
+                score_track.brace = brace
             _apply_expression_marks(
                 score_track, song, beats_per_measure(time_signature)
             )
@@ -501,6 +520,35 @@ _GROUP_BY_ROLE = {
 def _group_of(role: str) -> str:
     """角色 → 分谱组名（未知角色不分组）。"""
     return _GROUP_BY_ROLE.get(str(role), "")
+
+
+#: 大谱表适用角色：只有"键盘式织体"的轨才拆两行（旋律/贝斯有各自谱表）
+_GRAND_STAFF_ROLES = frozenset({"harmony", "arpeggio"})
+#: GM 钢琴/键盘家族音色号（0 大钢琴 .. 11 电颤琴）
+_GRAND_STAFF_PROGRAM_MAX = 11
+#: 左右手分界（中央 C 归右手）
+_GRAND_STAFF_SPLIT_PITCH = 60
+
+
+def _is_piano_family(track, program: int) -> bool:
+    """键盘家族判定：织体角色 + GM 钢琴音色段 + 非鼓轨。"""
+    if getattr(track, "is_drum", False):
+        return False
+    if str(getattr(track, "role", "")) not in _GRAND_STAFF_ROLES:
+        return False
+    return 0 <= program <= _GRAND_STAFF_PROGRAM_MAX
+
+
+def _split_hands(notes: Sequence[object], split_pitch: int = _GRAND_STAFF_SPLIT_PITCH
+                 ) -> Tuple[List[object], List[object]]:
+    """按音高把音符分到右手（≥split_pitch）/左手（<split_pitch）。
+
+    顺序保持各自稳定（上下两行都按时间排序交给布局层）；空手在记谱侧
+    会自动补整小节休止符。
+    """
+    upper = [n for n in notes if int(n.pitch) >= split_pitch]
+    lower = [n for n in notes if int(n.pitch) < split_pitch]
+    return upper, lower
 
 
 #: 段落渐变 → MusicXML ``<wedge>`` 类型

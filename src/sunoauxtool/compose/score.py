@@ -18,7 +18,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from sunoauxtool.logging_setup import get_logger
-from sunoauxtool.score.layout import layout_score
+from sunoauxtool.score.layout import LayoutOptions, layout_score, paginate_layout
 from sunoauxtool.score.model import Score
 from sunoauxtool.score.musicxml import write_musicxml
 from sunoauxtool.score.png import write_png
@@ -43,6 +43,8 @@ class ScoreOptions:
     clefs: dict[str, str] | None = None
     part_groups: bool = True
     scale: float = 2.0
+    grand_staff: bool = True
+    systems_per_page: int = 0
 
     def normalized_formats(self) -> tuple[str, ...]:
         """校验并归一化格式列表（去重、保持顺序、小写）。"""
@@ -87,30 +89,54 @@ def build_score(
     composer: str = "",
     clefs: dict[str, str] | None = None,
     part_groups: bool = True,
+    grand_staff: bool = True,
 ) -> Score:
-    """把编排好的 ``Song`` 转成 ``Score``（多轨、含移调与分谱组）。"""
+    """把编排好的 ``Song`` 转成 ``Score``（多轨、移调、分谱组、2.6 大谱表）。"""
     song.validate()
     return Score.from_song(
-        song, composer=composer, clefs=clefs, part_groups=part_groups
+        song, composer=composer, clefs=clefs, part_groups=part_groups,
+        grand_staff=grand_staff,
     )
 
 
 def _write(score: Score, out_dir: Path, stem: str, formats: tuple[str, ...],
-           *, scale: float) -> dict[str, Path]:
-    """按格式渲染一份谱面，返回 ``{格式: 路径}``。"""
+           *, scale: float, part_groups: bool = True,
+           systems_per_page: int = 0) -> dict[str, Path]:
+    """按格式渲染一份谱面，返回 ``{格式: 路径}``。
+
+    ``part_groups=False`` 时 MusicXML 不输出任何分组标记（bracket 与 brace 都不写）。
+    """
+    from sunoauxtool.score.musicxml import MusicXmlOptions
+
     written: dict[str, Path] = {}
     layout = None
     for fmt in formats:
         target = out_dir / f"{stem}{SCORE_FORMATS[fmt]}"
         if fmt == "musicxml":
-            written[fmt] = Path(write_musicxml(score, target))
+            written[fmt] = Path(write_musicxml(
+                score, target, MusicXmlOptions(include_part_groups=part_groups)
+            ))
             continue
         if layout is None:
-            layout = layout_score(score)
-        if fmt == "svg":
-            written[fmt] = Path(write_svg(layout, target))
-        else:  # png
-            written[fmt] = Path(write_png(layout, target, scale=scale))
+            layout = layout_score(
+                score, LayoutOptions(systems_per_page=0)  # 先按单页排版再切页
+            )
+        pages = paginate_layout(layout, systems_per_page)
+        if len(pages) == 1:
+            if fmt == "svg":
+                written[fmt] = Path(write_svg(layout, target))
+            else:  # png
+                written[fmt] = Path(write_png(layout, target, scale=scale))
+            continue
+        # 多页：每页一个文件（<stem>-page01.svg …）
+        for index, page in enumerate(pages, start=1):
+            page_target = out_dir / f"{stem}-page{index:02d}{SCORE_FORMATS[fmt]}"
+            if fmt == "svg":
+                write_svg(page, page_target)
+            else:
+                write_png(page, page_target, scale=scale)
+            if index == 1:
+                written[fmt] = Path(page_target)
     return written
 
 
@@ -137,13 +163,15 @@ def export_score(
     formats = options.normalized_formats()
     score = build_score(
         song, composer=options.composer, clefs=options.clefs,
-        part_groups=options.part_groups,
+        part_groups=options.part_groups, grand_staff=options.grand_staff,
     )
     out = Path(out_dir)
     out.mkdir(parents=True, exist_ok=True)
     stem = _safe_name(score.title or "score")
     result = ScoreResult(out_dir=out, score=score)
-    result.full = _write(score, out, stem, formats, scale=options.scale)
+    result.full = _write(score, out, stem, formats, scale=options.scale,
+                          part_groups=options.part_groups,
+                          systems_per_page=options.systems_per_page)
 
     if options.parts and len(score.tracks) > 1:
         parts_dir = out / "parts"
@@ -153,7 +181,9 @@ def export_score(
             single = singles[index]
             name = _safe_name(track.name or f"part{index + 1}")
             result.parts[track.name or name] = _write(
-                single, parts_dir, name, formats, scale=options.scale
+                single, parts_dir, name, formats, scale=options.scale,
+                part_groups=options.part_groups,
+                systems_per_page=options.systems_per_page,
             )
     logger.info(
         "总谱导出完成：%s（%d 轨，格式 %s，分谱 %d）",
@@ -174,8 +204,17 @@ def describe_score(result: ScoreResult) -> list[str]:
     lines = []
     if score is not None:
         transposing = [track.name for track in score.tracks if track.is_transposing]
+        # 大谱表的两行算一个声部（brace 相同的连续轨合并计数）
+        voices = 0
+        last_brace = None
+        for track in score.tracks:
+            brace = track.brace or ""
+            if brace and brace == last_brace:
+                continue
+            voices += 1
+            last_brace = brace
         lines.append(
-            f"总谱 {score.title}：{len(score.tracks)} 声部｜{score.bars} 小节｜"
+            f"总谱 {score.title}：{voices} 声部｜{score.bars} 小节｜"
             f"{score.key}｜{score.time_signature}｜{score.note_count} 音符"
         )
         if transposing:
